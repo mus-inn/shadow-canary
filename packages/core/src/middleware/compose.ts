@@ -32,6 +32,24 @@ export type ShadowCanaryMiddlewareOptions = {
    * Pass `''` (empty string) to explicitly disable auto-detection.
    */
   bypassToken?: string;
+  /**
+   * Git branch name that produces the "current prod" deployment. The shadow
+   * slot is deployed from a different branch (usually `master`) but with
+   * `vercel deploy --prod`, so both shadow and current-prod end up with
+   * `VERCEL_ENV=production` baked in at build time. `VERCEL_GIT_COMMIT_REF`
+   * is the only runtime signal that distinguishes them — if it doesn't match
+   * this branch, the middleware bails out and the deploy serves its own
+   * content directly.
+   *
+   * Default: `SHADOW_CANARY_PRODUCTION_BRANCH` env var if set, else
+   * `'production'` (the branch name the reference deploy workflows use).
+   *
+   * Pass `''` (empty string) — or set the env var to empty — to disable the
+   * branch filter entirely and rely only on `VERCEL_ENV` + the
+   * `x-shadow-routed` loop guard. Use this if you don't follow the 2-branch
+   * shadow-canary convention (e.g. your prod branch is `main` or `master`).
+   */
+  productionBranch?: string;
 };
 
 function getClientIP(req: NextRequest): string | null {
@@ -88,6 +106,10 @@ export async function shadowCanaryMiddleware(
   const cookieMaxAge = opts?.cookieMaxAge ?? 86400;
   const bypassToken =
     opts?.bypassToken ?? process.env['VERCEL_AUTOMATION_BYPASS_SECRET'];
+  const productionBranch =
+    opts?.productionBranch ??
+    process.env['SHADOW_CANARY_PRODUCTION_BRANCH'] ??
+    'production';
 
   // Already rewritten upstream — serve as-is (prevents loops on the shadow /
   // previous-prod deploys).
@@ -95,12 +117,16 @@ export async function shadowCanaryMiddleware(
     return null;
   }
 
-  // Only the production-branch deploy owns the routing decision. Master-branch
-  // deploys (shadow role) and any former-prod deploys (previous slot) serve
-  // their own content when hit directly.
+  // Only the current-prod branch deploy owns the routing decision. Both
+  // shadow and current-prod are built with `vercel deploy --prod` so they
+  // share VERCEL_ENV=production — branch name is the only runtime signal
+  // that separates them. Skip the check when productionBranch is '' so
+  // consumers outside the strict 2-branch shadow-canary topology aren't
+  // forced to rename their branch.
   if (
+    productionBranch &&
     process.env['VERCEL_GIT_COMMIT_REF'] &&
-    process.env['VERCEL_GIT_COMMIT_REF'] !== 'production'
+    process.env['VERCEL_GIT_COMMIT_REF'] !== productionBranch
   ) {
     return null;
   }

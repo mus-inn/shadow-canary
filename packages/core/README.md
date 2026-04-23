@@ -65,6 +65,29 @@ export async function middleware(req: NextRequest) {
 }
 ```
 
+### Production branch
+
+Both the shadow and current-prod slots are deployed with `vercel deploy --prod`,
+which means both get `VERCEL_ENV=production` baked in at build time. The
+middleware uses `VERCEL_GIT_COMMIT_REF` (git branch name) as the only runtime
+signal to distinguish them — only deploys built from the configured prod
+branch actually route traffic.
+
+Default branch name: `'production'` (matches the branch the reference deploy
+workflows push to). If your prod branch is `main`, `master`, or anything else,
+tell the middleware:
+
+```ts
+await shadowCanaryMiddleware(req, {
+  productionBranch: 'master', // or 'main', etc.
+});
+```
+
+Or set the `SHADOW_CANARY_PRODUCTION_BRANCH` env var on Vercel — the middleware
+picks it up automatically, no code change needed. Pass `''` (empty string) to
+disable the branch filter entirely when you don't follow the 2-branch
+shadow-canary topology.
+
 ### Vercel Deployment Protection
 
 If your Vercel project has Deployment Protection enabled (password / SSO), the
@@ -149,6 +172,7 @@ if (!verifySessionToken(token)) {
 | `VERCEL_PROJECT_ID` | REST API calls | Deployments / promote |
 | `VERCEL_EDGE_CONFIG_ID` | REST API patching | Config writes |
 | `VERCEL_AUTOMATION_BYPASS_SECRET` | Edge middleware | Rewrites past Deployment Protection (auto-injected by Vercel) |
+| `SHADOW_CANARY_PRODUCTION_BRANCH` | Edge middleware | Git branch name of the current-prod slot (default: `production`) |
 | `ADMIN_USER` | Session auth | Admin login (default: `admin`) |
 | `ADMIN_PASS` | Session auth | Admin login (default: `12345`) |
 | `ADMIN_SESSION_SECRET` | HMAC signing | Session tokens |

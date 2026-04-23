@@ -174,6 +174,7 @@ beforeEach(() => {
   delete process.env['VERCEL_GIT_COMMIT_REF'];
   delete process.env['VERCEL_ENV'];
   delete process.env['VERCEL_AUTOMATION_BYPASS_SECRET'];
+  delete process.env['SHADOW_CANARY_PRODUCTION_BRANCH'];
   mockGetShadowConfig.mockResolvedValue(BASE_CFG);
 });
 
@@ -363,6 +364,80 @@ describe('shadowCanaryMiddleware — custom options', () => {
       { botPattern: /myCustomMonitor/i },
     );
     expect(result).toBeNull();
+  });
+});
+
+describe('shadowCanaryMiddleware — production branch filter', () => {
+  it('runs middleware when VERCEL_GIT_COMMIT_REF matches custom productionBranch option', async () => {
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'master';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      { productionBranch: 'master' },
+    )) as MockNextResponse | null;
+    expect(result?.type).toBe('rewrite');
+    expect(result?.rewriteUrl?.hostname).toBe('shadow.example.vercel.app');
+  });
+
+  it('runs middleware when VERCEL_GIT_COMMIT_REF matches SHADOW_CANARY_PRODUCTION_BRANCH env var', async () => {
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'main';
+    process.env['SHADOW_CANARY_PRODUCTION_BRANCH'] = 'main';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    )) as MockNextResponse | null;
+    expect(result?.type).toBe('rewrite');
+  });
+
+  it('empty productionBranch option disables the branch filter entirely', async () => {
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'feature/xyz';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      { productionBranch: '' },
+    )) as MockNextResponse | null;
+    expect(result?.type).toBe('rewrite');
+  });
+
+  it('option takes precedence over SHADOW_CANARY_PRODUCTION_BRANCH env var', async () => {
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'master';
+    process.env['SHADOW_CANARY_PRODUCTION_BRANCH'] = 'main';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      { productionBranch: 'master' },
+    )) as MockNextResponse | null;
+    expect(result?.type).toBe('rewrite');
+  });
+
+  it('bails when VERCEL_GIT_COMMIT_REF is set to anything other than the configured branch (default: production)', async () => {
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'some-feature';
+    const req = makeReq();
+    const result = await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    );
+    expect(result).toBeNull();
+    expect(mockGetShadowConfig).not.toHaveBeenCalled();
   });
 });
 
