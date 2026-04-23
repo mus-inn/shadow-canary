@@ -173,6 +173,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   delete process.env['VERCEL_GIT_COMMIT_REF'];
   delete process.env['VERCEL_ENV'];
+  delete process.env['VERCEL_AUTOMATION_BYPASS_SECRET'];
   mockGetShadowConfig.mockResolvedValue(BASE_CFG);
 });
 
@@ -362,5 +363,92 @@ describe('shadowCanaryMiddleware — custom options', () => {
       { botPattern: /myCustomMonitor/i },
     );
     expect(result).toBeNull();
+  });
+});
+
+describe('shadowCanaryMiddleware — Vercel Deployment Protection bypass', () => {
+  it('injects bypass headers on shadow rewrite when VERCEL_AUTOMATION_BYPASS_SECRET is set', async () => {
+    process.env['VERCEL_AUTOMATION_BYPASS_SECRET'] = 'env-secret';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    )) as MockNextResponse | null;
+    expect(result?.type).toBe('rewrite');
+    const headers = result!.requestHeaders as unknown as Headers;
+    expect(headers.get('x-vercel-protection-bypass')).toBe('env-secret');
+    expect(headers.get('x-vercel-set-bypass-cookie')).toBe('samesitenone');
+  });
+
+  it('bypassToken option takes precedence over VERCEL_AUTOMATION_BYPASS_SECRET', async () => {
+    process.env['VERCEL_AUTOMATION_BYPASS_SECRET'] = 'env-secret';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      { bypassToken: 'explicit-token' },
+    )) as MockNextResponse | null;
+    const headers = result!.requestHeaders as unknown as Headers;
+    expect(headers.get('x-vercel-protection-bypass')).toBe('explicit-token');
+  });
+
+  it('omits bypass headers when no token is configured', async () => {
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    )) as MockNextResponse | null;
+    const headers = result!.requestHeaders as unknown as Headers;
+    expect(headers.get('x-vercel-protection-bypass')).toBeNull();
+    expect(headers.get('x-vercel-set-bypass-cookie')).toBeNull();
+    // routedHeader still set — sanity check that header wiring isn't broken
+    expect(headers.get('x-shadow-routed')).toBe('1');
+  });
+
+  it('empty bypassToken option disables auto-detection from env', async () => {
+    process.env['VERCEL_AUTOMATION_BYPASS_SECRET'] = 'env-secret';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 100,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      { bypassToken: '' },
+    )) as MockNextResponse | null;
+    const headers = result!.requestHeaders as unknown as Headers;
+    expect(headers.get('x-vercel-protection-bypass')).toBeNull();
+  });
+
+  it('injects bypass headers on previous-prod rewrite too', async () => {
+    process.env['VERCEL_AUTOMATION_BYPASS_SECRET'] = 'env-secret';
+    mockGetShadowConfig.mockResolvedValue({
+      ...BASE_CFG,
+      trafficShadowPercent: 0,
+      deploymentDomainProdPrevious: 'prev.example.vercel.app',
+      trafficProdCanaryPercent: 0,
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    const req = makeReq();
+    const result = (await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    )) as MockNextResponse | null;
+    expect(result?.rewriteUrl?.hostname).toBe('prev.example.vercel.app');
+    const headers = result!.requestHeaders as unknown as Headers;
+    expect(headers.get('x-vercel-protection-bypass')).toBe('env-secret');
+    expect(headers.get('x-vercel-set-bypass-cookie')).toBe('samesitenone');
   });
 });

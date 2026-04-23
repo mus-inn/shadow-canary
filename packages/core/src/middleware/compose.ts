@@ -20,6 +20,18 @@ export type ShadowCanaryMiddlewareOptions = {
    * sidestep Vercel Pro's 3-store limit.
    */
   configKey?: string;
+  /**
+   * Vercel Deployment Protection bypass secret. Injected on the rewrite as
+   * `x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie: samesitenone`
+   * so shadow / previous-prod deployment URLs pass password / SSO protection.
+   *
+   * Default: `VERCEL_AUTOMATION_BYPASS_SECRET` env var (Vercel auto-injects
+   * this when "Protection Bypass for Automation" is enabled on the project),
+   * so the out-of-the-box setup requires zero caller config.
+   *
+   * Pass `''` (empty string) to explicitly disable auto-detection.
+   */
+  bypassToken?: string;
 };
 
 function getClientIP(req: NextRequest): string | null {
@@ -32,6 +44,7 @@ function rewriteTo(
   req: NextRequest,
   host: string,
   routedHeader: string,
+  bypassToken?: string,
 ): NextResponse {
   const target = host.replace(/^https?:\/\//, '');
   const url = req.nextUrl.clone();
@@ -40,6 +53,10 @@ function rewriteTo(
   url.port = '';
   const headers = new Headers(req.headers);
   headers.set(routedHeader, '1');
+  if (bypassToken) {
+    headers.set('x-vercel-protection-bypass', bypassToken);
+    headers.set('x-vercel-set-bypass-cookie', 'samesitenone');
+  }
   return NextResponse.rewrite(url, { request: { headers } });
 }
 
@@ -69,6 +86,8 @@ export async function shadowCanaryMiddleware(
   const botPattern =
     opts?.botPattern ?? /bot|crawl|spider|scraper|headless|preview/i;
   const cookieMaxAge = opts?.cookieMaxAge ?? 86400;
+  const bypassToken =
+    opts?.bypassToken ?? process.env['VERCEL_AUTOMATION_BYPASS_SECRET'];
 
   // Already rewritten upstream — serve as-is (prevents loops on the shadow /
   // previous-prod deploys).
@@ -125,7 +144,12 @@ export async function shadowCanaryMiddleware(
     (!stickyProdBucket && Math.random() * 100 < shadowPercent);
 
   if (isShadow && cfg.deploymentDomainShadow) {
-    const res = rewriteTo(req, cfg.deploymentDomainShadow, routedHeader);
+    const res = rewriteTo(
+      req,
+      cfg.deploymentDomainShadow,
+      routedHeader,
+      bypassToken,
+    );
     if (!stickyShadow && !ipForced) {
       res.cookies.set(cookieName, 'shadow', {
         maxAge: cookieMaxAge,
@@ -160,7 +184,7 @@ export async function shadowCanaryMiddleware(
 
   const res =
     prodBucket === 'previous' && previous
-      ? rewriteTo(req, previous, routedHeader)
+      ? rewriteTo(req, previous, routedHeader, bypassToken)
       : null; // caller does NextResponse.next()
 
   const want = prodBucket === 'new' ? 'prod-new' : 'prod-previous';

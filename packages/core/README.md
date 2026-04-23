@@ -65,6 +65,24 @@ export async function middleware(req: NextRequest) {
 }
 ```
 
+### Vercel Deployment Protection
+
+If your Vercel project has Deployment Protection enabled (password / SSO), the
+shadow and previous-prod deployment URLs would block the rewrite. Enable
+**"Protection Bypass for Automation"** in the project settings — Vercel
+auto-injects the `VERCEL_AUTOMATION_BYPASS_SECRET` env var, which the
+middleware picks up automatically and attaches to rewrites as
+`x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie: samesitenone`.
+
+Zero caller config required. Override with the `bypassToken` option if you
+need a different source, or pass `''` to explicitly disable:
+
+```ts
+await shadowCanaryMiddleware(req, {
+  bypassToken: process.env.MY_CUSTOM_BYPASS, // default: VERCEL_AUTOMATION_BYPASS_SECRET
+});
+```
+
 ### Reading config from the edge
 
 ```ts
@@ -130,6 +148,7 @@ if (!verifySessionToken(token)) {
 | `VERCEL_ORG_ID` | REST API calls | Admin operations |
 | `VERCEL_PROJECT_ID` | REST API calls | Deployments / promote |
 | `VERCEL_EDGE_CONFIG_ID` | REST API patching | Config writes |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | Edge middleware | Rewrites past Deployment Protection (auto-injected by Vercel) |
 | `ADMIN_USER` | Session auth | Admin login (default: `admin`) |
 | `ADMIN_PASS` | Session auth | Admin login (default: `12345`) |
 | `ADMIN_SESSION_SECRET` | HMAC signing | Session tokens |
