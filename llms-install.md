@@ -8,10 +8,13 @@ Ask once, up front:
 
 1. **Vercel Project ID** (format `prj_xxx`) — from `.vercel/project.json` or Vercel dashboard Project Settings → General
 2. **Vercel Org/Team ID** (format `team_xxx` or `ORG_xxx`) — same location
-3. **Vercel Edge Config Store ID** (format `ecfg_xxx`) — user must create one in Vercel Storage tab, named e.g. `<project>-shadow-config`, and link it to the project. If they don't have one yet, tell them to create it before continuing.
-4. **Admin username** for the /admin dashboard (default: `admin`)
-5. **Admin password** — ask if they want you to generate one (run `openssl rand -base64 24`) or provide their own
-6. **Slack webhook URL** (optional) — for canary notifications
+3. **Vercel Edge Config Store ID** (format `ecfg_xxx`) — user must have one created in Vercel Storage tab and linked to the project. They can either:
+   - Create a **dedicated store** for this project (recommended if store count < Vercel plan limit), OR
+   - **Share an existing store** with other shadow-canary projects by using a project-specific Edge Config key (see input 4 below). Sharing is the standard workaround for Vercel Pro's 3-store limit.
+4. **Config key** (default: `shadow-configuration`) — the Edge Config key holding this project's ShadowConfig payload. Keep the default unless the store is shared with other shadow-canary projects — in that case, pick a unique key like `shadow-configuration-<project-name>`. This value maps to the `SHADOW_CANARY_KEY` env var.
+5. **Admin username** for the /admin dashboard (default: `admin`)
+6. **Admin password** — ask if they want you to generate one (run `openssl rand -base64 24`) or provide their own
+7. **Slack webhook URL** (optional) — for canary notifications
 
 ## Pre-flight detection (run read-only)
 
@@ -88,6 +91,14 @@ Fill in using the inputs collected at start. Generate `ADMIN_SESSION_SECRET`:
 openssl rand -hex 32
 ```
 
+If the user chose a non-default config key at input 4, also add:
+
+```bash
+SHADOW_CANARY_KEY=shadow-configuration-<project-name>
+```
+
+Leave it absent (or comment it out) if the default `shadow-configuration` key is used.
+
 ### Step 6 — Handle existing middleware (CONDITIONAL)
 
 Only if Pre-flight detected an existing middleware file:
@@ -128,16 +139,20 @@ Write at project root:
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "vercelProjectId": "<from input>",
   "vercelOrgId": "<from input>",
   "edgeConfigId": "<from input>",
+  "configKey": "shadow-configuration",
   "adminPath": "/admin",
   "sloPath": "/api/slo"
 }
 ```
 
-Adjust `adminPath`/`sloPath` if renamed in Step 7. This file is read by the `@dotworld/shadow-canary-skill` Claude Code skill.
+- Set `configKey` to the value from input 4 (default `shadow-configuration`, or a project-specific sub-key if sharing the store).
+- Adjust `adminPath`/`sloPath` if renamed in Step 7.
+
+This file is read by the `@dotworld/shadow-canary-skill` Claude Code skill.
 
 ### Step 9 — Update .gitignore
 
@@ -179,8 +194,9 @@ Before shadow-canary is active, you must manually:
 2. Vercel Project Settings → Advanced:
    - Skew Protection = ON (7 days)
 
-3. Vercel Edge Config → the store you created:
-   - Add key `shadow-configuration` with initial value:
+3. Vercel Edge Config → the store you created or are sharing:
+   - Add a key equal to your `configKey` value (default `shadow-configuration`, or
+     e.g. `shadow-configuration-<project>` when sharing the store) with initial value:
      {"trafficShadowPercent": 0, "trafficProdCanaryPercent": 100, "shadowForceIPs": []}
 
 4. Vercel Project Environment Variables (Production + Preview):
@@ -188,6 +204,7 @@ Before shadow-canary is active, you must manually:
    - VERCEL_ORG_ID (your team ID)
    - VERCEL_EDGE_CONFIG_ID (the ecfg_xxx you provided)
    - ADMIN_USER, ADMIN_PASS, ADMIN_SESSION_SECRET (as filled in .env.local)
+   - SHADOW_CANARY_KEY (ONLY if the config key is not the default `shadow-configuration`)
 
 5. GitHub Repository Settings → Secrets and variables → Actions:
    - VERCEL_TOKEN (same as VERCEL_API_TOKEN above, named differently)
@@ -213,6 +230,8 @@ Before shadow-canary is active, you must manually:
 
 - Chunks 404 on cross-deploy rewrites → Skew Protection is OFF
 - /admin shows "unconfigured" → Edge Config ID wrong or store not linked to project
+- /admin reads an empty config when sharing a store → `SHADOW_CANARY_KEY` env var missing or key mismatched with the Edge Config item
 - SSO 401 on rewrites → Deployment Protection enabled without bypass; see Vercel docs
 - Cron not firing → canary-ramp.yml cron runs on default branch only; verify default = master
 - `VERCEL_DEPLOYMENT_ID` undefined in build → do not use `--prebuilt` flag in CI workflows
+- Hit Vercel's 3-store Pro plan limit → share one store across projects via unique `SHADOW_CANARY_KEY` per project

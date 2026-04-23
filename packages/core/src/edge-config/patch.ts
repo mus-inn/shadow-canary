@@ -1,6 +1,7 @@
 // Server-only helpers for talking to Vercel REST API and patching Edge Config.
 // Never import from client components or edge runtime.
 import type { ShadowConfig } from '../types.js';
+import { resolveConfigKey } from './read.js';
 
 const VERCEL_API_TOKEN = process.env['VERCEL_API_TOKEN'];
 const VERCEL_ORG_ID = process.env['VERCEL_ORG_ID'];
@@ -35,28 +36,42 @@ async function vercelFetch(
   });
 }
 
-export async function readShadowConfig(): Promise<ShadowConfig | null> {
+/**
+ * Read the ShadowConfig payload from Edge Config. If `configKey` is omitted,
+ * resolves via `SHADOW_CANARY_KEY` env var, then defaults to
+ * `'shadow-configuration'`.
+ */
+export async function readShadowConfig(
+  configKey?: string,
+): Promise<ShadowConfig | null> {
   const err = checkEnv();
   if (err) throw new Error(err);
+  const key = resolveConfigKey(configKey);
 
   const res = await vercelFetch(`/v1/edge-config/${EDGE_CONFIG_ID}/items`);
   if (!res.ok) throw new Error(`Edge Config read failed: ${res.status}`);
   const items = (await res.json()) as Array<{ key: string; value: unknown }>;
-  const hit = items.find((i) => i.key === 'shadow-configuration');
+  const hit = items.find((i) => i.key === key);
   return (hit?.value as ShadowConfig) ?? null;
 }
 
+/**
+ * Merge-patch the ShadowConfig at the resolved key. `opts.unset` deletes those
+ * keys from the merged object before writing. Pass `opts.configKey` to target
+ * a specific Edge Config entry (useful for multi-project stores).
+ */
 export async function patchShadowConfig(
   patch: Partial<ShadowConfig>,
-  opts?: { unset?: (keyof ShadowConfig)[] },
+  opts?: { unset?: (keyof ShadowConfig)[]; configKey?: string },
 ): Promise<ShadowConfig> {
   const err = checkEnv();
   if (err) throw new Error(err);
+  const key = resolveConfigKey(opts?.configKey);
 
-  const current = (await readShadowConfig()) ?? {};
+  const current = (await readShadowConfig(key)) ?? {};
   const merged: ShadowConfig = { ...current, ...patch };
   if (opts?.unset) {
-    for (const key of opts.unset) delete merged[key];
+    for (const k of opts.unset) delete merged[k];
   }
 
   const res = await vercelFetch(`/v1/edge-config/${EDGE_CONFIG_ID}/items`, {
@@ -65,7 +80,7 @@ export async function patchShadowConfig(
       items: [
         {
           operation: 'upsert',
-          key: 'shadow-configuration',
+          key,
           value: merged,
         },
       ],

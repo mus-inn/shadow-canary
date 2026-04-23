@@ -11,6 +11,15 @@ export type ShadowCanaryMiddlewareOptions = {
   botPattern?: RegExp;
   /** Max-age in seconds for the sticky bucket cookie. Default: 86400 (24h) */
   cookieMaxAge?: number;
+  /**
+   * Edge Config key holding this project's ShadowConfig payload.
+   * Default: resolved from `SHADOW_CANARY_KEY` env var, else `'shadow-configuration'`.
+   *
+   * Use a project-specific key (e.g. `shadow-configuration-<app>`) when
+   * sharing one Edge Config store across multiple projects, typically to
+   * sidestep Vercel Pro's 3-store limit.
+   */
+  configKey?: string;
 };
 
 function getClientIP(req: NextRequest): string | null {
@@ -90,7 +99,7 @@ export async function shadowCanaryMiddleware(
     return null;
   }
 
-  const cfg = await getShadowConfig();
+  const cfg = await getShadowConfig(opts?.configKey);
   if (!cfg) return null;
 
   const clientIP = getClientIP(req);

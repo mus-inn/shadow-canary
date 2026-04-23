@@ -55,6 +55,8 @@ Edge Config is Vercel's global key-value store with sub-millisecond read latency
 
 **Hobby plan limits:** The Hobby plan includes one Edge Config store with limited item size. Shadow-canary's single `shadow-configuration` key is well within the limits.
 
+**Pro plan limits:** Pro allows 3 stores per team. If you want to run shadow-canary on 4+ projects, share one store across them by giving each project its own sub-key. See [Sharing a store across projects](/shadow-canary/concepts/edge-config/#sharing-a-store-across-projects).
+
 **Propagation time:** Edge Config updates take up to 60 seconds to reach all warm middleware instances (the in-process cache TTL). Plan for this when doing manual overrides.
 
 ## Vercel token scopes

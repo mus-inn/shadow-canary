@@ -1,6 +1,6 @@
 {
   "name": "@dotworld/shadow-canary-templates",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "File payload for shadow-canary, copyable into Next.js projects",
   "type": "module",
   "bin": {
@@ -17,7 +17,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/shadow-canary.git",
+    "url": "https://github.com/mus-inn/shadow-canary.git",
     "directory": "packages/templates"
   },
   "license": "MIT"

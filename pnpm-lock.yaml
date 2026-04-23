@@ -38,8 +38,8 @@ importers:
   examples/greenfield:
     dependencies:
       '@dotworld/shadow-canary-core':
-        specifier: ^0.1.0
-        version: 0.1.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
+        specifier: ^0.2.0
+        version: 0.2.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
       '@vercel/edge-config':
         specifier: ^1.4.0
         version: 1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
@@ -281,8 +281,8 @@ packages:
     resolution: {integrity: sha512-kzyuwOAQnXJNLS9PSyrk0CWk35nWJW/zl/6KvnTBMFK65gm7U1/Z5BqjxeapjZCIhQcM/DsrEmcbRwDyXyXK4A==}
     engines: {node: '>=14'}
 
-  '@dotworld/shadow-canary-core@0.1.0':
-    resolution: {integrity: sha512-5vTVYqNMtamq/YJoDWYIq3Eya3z19eZ1m3ZQdOTnz0TxRts0p7kRTA+wa9w3OEsCLS4ZKp4C2Fd+i+ma2Ui9Sw==}
+  '@dotworld/shadow-canary-core@0.2.0':
+    resolution: {integrity: sha512-adALonIDEq5PsMoQj5Y/MFmTIPoPdV4+MgCIe0fnrYGH6R2jcKLLPysTu7oUlOQcvkd5lLraxdkYx5FMgT/vpg==}
     peerDependencies:
       '@vercel/edge-config': '>=1.0.0'
       next: '>=13.4.0'
@@ -3647,7 +3647,7 @@ snapshots:
 
   '@ctrl/tinycolor@4.2.0': {}
 
-  '@dotworld/shadow-canary-core@0.1.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)':
+  '@dotworld/shadow-canary-core@0.2.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)':
     dependencies:
       '@vercel/edge-config': 1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
       next: 15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)

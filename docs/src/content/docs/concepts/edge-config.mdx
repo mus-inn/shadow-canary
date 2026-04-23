@@ -5,7 +5,9 @@ description: The shadow-configuration key schema — every field explained.
 
 import { Aside } from '@astrojs/starlight/components';
 
-Shadow-canary stores all routing state in a single Edge Config key called `shadow-configuration`. The middleware reads this key on every request (with a 60-second in-process cache). The three workflows write to it on every deploy or canary tick.
+Shadow-canary stores all routing state in a single Edge Config key. The middleware reads this key on every request (with a 60-second in-process cache). The three workflows write to it on every deploy or canary tick.
+
+By default the key is `shadow-configuration`. Starting with `@dotworld/shadow-canary-core@0.2.0` you can override it per project via the `SHADOW_CANARY_KEY` environment variable — useful when sharing one Edge Config store across several projects (see [Sharing a store](#sharing-a-store-across-projects) below).
 
 ## Full schema
 
@@ -129,12 +131,60 @@ The middleware caches the Edge Config response in module memory for 60 seconds. 
 
 ## Manual edits
 
-You can edit `shadow-configuration` directly in the Vercel dashboard (Storage > your store > Items). Common manual operations:
+You can edit the config directly in the Vercel dashboard (Storage > your store > Items). Common manual operations:
 
 - Set `trafficShadowPercent: 0` to kill the shadow (shadow still exists, gets no traffic)
 - Set `trafficProdCanaryPercent: 0` to roll back a canary manually
 - Add or remove IPs in `shadowForceIPs`
 - Set `canaryPaused: false` to resume a paused canary
+
+## Sharing a store across projects
+
+Vercel's Pro plan limits you to **3 Edge Config stores** per team. If you want to run shadow-canary on 4+ projects, you can host all their configs as separate keys inside one shared store.
+
+### Setup
+
+1. Link the same Edge Config store to every project (Vercel Storage → your store → Projects → Connect).
+2. In each project's environment variables, set:
+
+   ```
+   SHADOW_CANARY_KEY=shadow-configuration-<project-name>
+   ```
+
+   Use a unique value per project — e.g. `shadow-configuration-stargaze`, `shadow-configuration-checkout`, etc.
+3. In the Edge Config store, create one item per project, each with its own key:
+
+   ```json
+   // Key: shadow-configuration-stargaze
+   { "trafficShadowPercent": 0, "trafficProdCanaryPercent": 100, "shadowForceIPs": [] }
+
+   // Key: shadow-configuration-checkout
+   { "trafficShadowPercent": 1, "trafficProdCanaryPercent": 100, "shadowForceIPs": [] }
+   ```
+
+The middleware, admin API, and canary-ramp workflow all honor `SHADOW_CANARY_KEY` automatically. No code changes in the host project.
+
+### Programmatic override
+
+If you want to target a specific key from code (not env), pass `configKey` explicitly:
+
+```ts
+import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
+
+export async function middleware(req: NextRequest) {
+  return (await shadowCanaryMiddleware(req, {
+    configKey: 'shadow-configuration-stargaze',
+  })) ?? NextResponse.next();
+}
+```
+
+<Aside type="caution">
+Trade-offs: a single store with many keys centralizes all your routing state — a broken write or corrupt value affects every project on the same store. Keep stores dedicated when you can. Use the shared-store pattern deliberately, not by default.
+</Aside>
+
+### Limits inside one store
+
+Edge Config has a **64 KB total payload limit per store**. A typical ShadowConfig item is ~400 bytes, so a single shared store can host ~150 projects in theory. Keep the `shadowForceIPs` list compact and you'll stay well under the limit.
 
 ---
 

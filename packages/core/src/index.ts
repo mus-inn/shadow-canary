@@ -1,4 +1,9 @@
 export * from './types.js';
+export {
+  DEFAULT_CONFIG_KEY,
+  resolveConfigKey,
+  clearConfigCache,
+} from './edge-config/read.js';
 export { readShadowConfig, patchShadowConfig } from './edge-config/patch.js';
 export { listDeployments } from './vercel/deployments.js';
 export { promoteDeployment } from './vercel/promote.js';
