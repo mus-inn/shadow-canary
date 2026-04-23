@@ -88,4 +88,22 @@ describe('getShadowConfig', () => {
     const result = await getShadowConfig('missing-key');
     expect(result).toBeNull();
   });
+
+  it('warns once per missing key (so Vercel runtime logs surface the silent bail)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    getMock.mockResolvedValue(undefined);
+
+    await getShadowConfig('missing-key-a');
+    await getShadowConfig('missing-key-a'); // second call must NOT re-warn
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/missing-key-a/);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/SHADOW_CANARY_KEY/);
+
+    // A different missing key earns its own warn
+    await getShadowConfig('missing-key-b');
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[1]?.[0]).toMatch(/missing-key-b/);
+
+    warn.mockRestore();
+  });
 });

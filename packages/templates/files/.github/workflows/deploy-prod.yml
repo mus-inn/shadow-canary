@@ -40,6 +40,32 @@ jobs:
         with:
           node-version: 20
 
+      - name: Verify SHADOW_CANARY_KEY consistency with Vercel project env
+        # Guardrail: the middleware reads SHADOW_CANARY_KEY from the Vercel
+        # project env (with fallback to 'shadow-configuration'). This workflow
+        # writes to the key from the GH Actions secret (same fallback). If
+        # those two values diverge, the workflow's writes are invisible to
+        # the middleware — the classic silent "shadow doesn't work" bug.
+        # Fail loud instead of letting them drift apart.
+        run: |
+          RESP=$(curl -s -o /tmp/vercel-envs.json -w "%{http_code}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID&decrypt=true")
+          if [ "$RESP" != "200" ]; then
+            echo "::warning::Could not verify SHADOW_CANARY_KEY against Vercel (HTTP $RESP). Needs env:read on VERCEL_TOKEN — skipping guardrail."
+            exit 0
+          fi
+          VERCEL_KEY=$(jq -r '[.envs[] | select(.key == "SHADOW_CANARY_KEY" and (.target | index("production")))] | .[0].value // ""' /tmp/vercel-envs.json)
+          RUNTIME_KEY="${VERCEL_KEY:-shadow-configuration}"
+          if [ "$SHADOW_CANARY_KEY" != "$RUNTIME_KEY" ]; then
+            echo "::error::SHADOW_CANARY_KEY mismatch — this workflow would silently write to a key the middleware never reads."
+            echo "::error::  Workflow writes to: '$SHADOW_CANARY_KEY' (from secrets.SHADOW_CANARY_KEY or default)"
+            echo "::error::  Middleware reads:   '$RUNTIME_KEY' (from Vercel env SHADOW_CANARY_KEY or default)"
+            echo "::error::Fix: set the GH repo secret SHADOW_CANARY_KEY and the Vercel project env SHADOW_CANARY_KEY to the same value."
+            exit 1
+          fi
+          echo "✓ SHADOW_CANARY_KEY matches on both sides: '$SHADOW_CANARY_KEY'"
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 

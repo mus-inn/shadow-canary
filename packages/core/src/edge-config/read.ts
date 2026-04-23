@@ -29,6 +29,12 @@ const CACHE_TTL_MS = 60_000;
 // Cache keyed by config-key so a single process handling multiple projects
 // (uncommon but valid) doesn't cross-contaminate reads.
 const cache = new Map<string, { data: ShadowConfig; timestamp: number }>();
+// Silent bails used to be the #1 "shadow doesn't work" trap — deploy
+// workflows writing to one Edge Config key and the middleware reading from
+// another (SHADOW_CANARY_KEY out of sync between GH Actions and Vercel env).
+// Warn once per missing key so it surfaces in Vercel runtime logs without
+// spamming on every request.
+const warnedMissingKeys = new Set<string>();
 
 export async function getShadowConfig(
   configKey?: string,
@@ -39,7 +45,18 @@ export async function getShadowConfig(
     return cached.data;
   }
   const data = await get<ShadowConfig>(key);
-  if (!data) return null;
+  if (!data) {
+    if (!warnedMissingKeys.has(key)) {
+      warnedMissingKeys.add(key);
+      console.warn(
+        `[shadow-canary] Edge Config key "${key}" returned no value — middleware will passthrough. ` +
+          `Check: (1) deploy-shadow.yml / deploy-prod.yml ran at least once to populate the config; ` +
+          `(2) SHADOW_CANARY_KEY on this deploy (Vercel env) matches the key the workflows write to (GH Actions secret SHADOW_CANARY_KEY); ` +
+          `(3) EDGE_CONFIG env var points to the right store.`,
+      );
+    }
+    return null;
+  }
   cache.set(key, { data, timestamp: Date.now() });
   return data;
 }
