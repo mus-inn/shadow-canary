@@ -1,0 +1,568 @@
+/* ========================================================================
+   Design tokens + shared primitives for the marketing / debug surfaces.
+   Admin has its own scoped stylesheet (app/admin/admin.css).
+   ======================================================================== */
+
+:root {
+  /* Palette */
+  --bg: #0a0a0a;
+  --fg: #ededed;
+  --fg-muted: rgba(255, 255, 255, 0.62);
+  --fg-subtle: rgba(255, 255, 255, 0.48);
+  --fg-faint: rgba(255, 255, 255, 0.32);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --surface: rgba(255, 255, 255, 0.035);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+
+  --accent: #f97316;
+  --accent-soft: rgba(249, 115, 22, 0.12);
+  --accent-border: rgba(249, 115, 22, 0.45);
+  --accent-fg: #fdba74;
+  --prod: #3b82f6;
+
+  /* Type scale — fluid where it matters */
+  --fs-xs: 0.75rem; /* 12 */
+  --fs-sm: 0.8125rem; /* 13 */
+  --fs-base: 0.9375rem; /* 15 — body on mobile */
+  --fs-md: 1rem; /* 16 */
+  --fs-lg: 1.125rem; /* 18 */
+  --fs-h2: clamp(1.125rem, 1rem + 0.5vw, 1.25rem);
+  --fs-h1: clamp(1.875rem, 1.35rem + 2.4vw, 2.625rem);
+
+  /* Spacing scale (matches admin) */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-7: 2rem;
+  --sp-8: 2.5rem;
+  --sp-9: 3rem;
+  --sp-10: 4rem;
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  font-feature-settings: 'cv11', 'ss01';
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+@media (min-width: 640px) {
+  body {
+    font-size: var(--fs-md);
+  }
+}
+
+a {
+  color: inherit;
+}
+
+code {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-variant-ligatures: none;
+}
+
+::selection {
+  background: rgba(249, 115, 22, 0.35);
+  color: #fff7ed;
+}
+
+/* ------------------------------------------------------------------------
+   Page shell shared by /, /debug and other marketing surfaces.
+   ------------------------------------------------------------------------ */
+
+.page {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-5) var(--sp-10);
+  min-height: 100dvh;
+}
+
+.page--wide {
+  max-width: 56rem;
+}
+
+@media (min-width: 640px) {
+  .page {
+    padding: var(--sp-10) var(--sp-7) var(--sp-10);
+  }
+}
+
+@media (min-width: 1024px) {
+  .page {
+    padding: calc(var(--sp-10) + var(--sp-3)) var(--sp-7) var(--sp-10);
+  }
+}
+
+/* ------------------------------------------------------------------------
+   Home page (/).
+   ------------------------------------------------------------------------ */
+
+.hm-title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.hm-title-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-fg);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+@media (min-width: 640px) {
+  .hm-title-badge {
+    font-size: 0.6875rem;
+    padding: 4px 11px;
+  }
+}
+
+.hm-lede {
+  margin: var(--sp-4) 0 0;
+  max-width: 58ch;
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  color: var(--fg-muted);
+  text-wrap: pretty;
+}
+
+.hm-pong {
+  margin-top: var(--sp-7);
+}
+
+.hm-meta {
+  margin: var(--sp-8) 0 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--sp-5);
+  row-gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  align-items: baseline;
+}
+
+@media (min-width: 640px) {
+  .hm-meta {
+    column-gap: var(--sp-6);
+    font-size: var(--fs-base);
+  }
+}
+
+.hm-meta dt {
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.hm-meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hm-back {
+  margin: var(--sp-8) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.hm-back a {
+  color: var(--fg-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  transition: color 160ms, text-decoration-color 160ms;
+}
+
+.hm-back a:hover {
+  color: var(--fg);
+  text-decoration-color: currentColor;
+}
+
+/* ------------------------------------------------------------------------
+   Debug page (/debug).
+   ------------------------------------------------------------------------ */
+
+.dbg-title {
+  margin: 0 0 var(--sp-6);
+  font-size: var(--fs-h1);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.dbg-served {
+  padding: var(--sp-5) var(--sp-6);
+  border-radius: var(--r-lg);
+  color: #ffffff;
+  background: var(--dbg-accent, var(--accent));
+  box-shadow: 0 8px 24px -12px color-mix(in oklab, var(--dbg-accent, var(--accent)) 55%, transparent);
+  margin-bottom: var(--sp-8);
+}
+
+.dbg-served-eyebrow {
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  opacity: 0.85;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.dbg-served-label {
+  margin-top: var(--sp-1);
+  font-size: clamp(1.375rem, 1.1rem + 1vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.dbg-served-meta {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  opacity: 0.92;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+  align-items: center;
+}
+
+.dbg-served-meta code {
+  background: rgba(0, 0, 0, 0.22);
+  color: inherit;
+}
+
+.dbg-section {
+  margin-top: var(--sp-8);
+}
+
+.dbg-section-title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.dbg-section-hint {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  max-width: 62ch;
+  color: var(--fg-muted);
+}
+
+.dbg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dbg-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-1) var(--sp-5);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--line);
+  align-items: baseline;
+}
+
+.dbg-row:first-child {
+  border-top: none;
+  padding-top: var(--sp-2);
+}
+
+@media (min-width: 640px) {
+  .dbg-row {
+    grid-template-columns: 12rem 1fr;
+    gap: var(--sp-5);
+    padding: var(--sp-3) 0;
+  }
+}
+
+.dbg-row-label {
+  color: var(--fg-subtle);
+  font-size: var(--fs-sm);
+}
+
+.dbg-row-value {
+  margin: 0;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Switch buttons (debug) */
+.dbg-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.dbg-switch {
+  padding: 0.55rem 0.95rem;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  cursor: pointer;
+  line-height: 1;
+  transition: transform 130ms, background 160ms, border-color 160ms,
+    box-shadow 160ms, color 160ms;
+  min-height: 36px;
+}
+
+.dbg-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dbg-switch:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.dbg-switch--shadow {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: color-mix(in oklab, var(--accent) 80%, #fff);
+}
+
+.dbg-switch--shadow:hover {
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.15);
+}
+
+.dbg-switch--prod {
+  background: var(--prod);
+  color: #ffffff;
+  border-color: color-mix(in oklab, var(--prod) 80%, #fff);
+}
+
+.dbg-switch--prod:hover {
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18);
+}
+
+.dbg-switch--ghost {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+.dbg-switch--ghost:hover {
+  background: var(--surface-hover);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.dbg-back {
+  margin: var(--sp-9) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.dbg-back a {
+  color: var(--dbg-accent, var(--accent));
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 1px;
+}
+
+/* ------------------------------------------------------------------------
+   Ping-pong idle animation.
+   ------------------------------------------------------------------------ */
+
+.pp-court {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 420 / 150;
+  background:
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0.04), transparent 70%),
+    rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pp-net {
+  position: absolute;
+  top: 14%;
+  bottom: 14%;
+  left: 50%;
+  width: 0;
+  border-left: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
+.pp-paddle {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 38px;
+  margin-top: -19px;
+  background: #ededed;
+  border-radius: 3px;
+  animation-duration: 2s;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  will-change: transform;
+}
+
+.pp-paddle-left {
+  left: 10px;
+  animation-name: pp-paddle-left;
+}
+
+.pp-paddle-right {
+  right: 10px;
+  animation-name: pp-paddle-right;
+}
+
+.pp-ball {
+  position: absolute;
+  top: 50%;
+  left: 22px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #f97316;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.45);
+  animation:
+    pp-ball-x 2s ease-in-out infinite,
+    pp-ball-y 1s ease-in-out infinite;
+  will-change: left, transform;
+}
+
+.pp-ball::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(249, 115, 22, 0.35) 0%,
+    transparent 65%
+  );
+  animation: pp-ball-glow 1s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pp-ball-x {
+  0% {
+    left: 22px;
+  }
+  50% {
+    left: calc(100% - 34px);
+  }
+  100% {
+    left: 22px;
+  }
+}
+
+@keyframes pp-ball-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-38px);
+  }
+}
+
+@keyframes pp-ball-glow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes pp-paddle-left {
+  0%,
+  100% {
+    transform: scaleY(1.15);
+  }
+  50% {
+    transform: translateY(-6px) scaleY(1);
+  }
+}
+
+@keyframes pp-paddle-right {
+  0%,
+  100% {
+    transform: translateY(6px) scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-ball,
+  .pp-ball::after,
+  .pp-paddle {
+    animation: none;
+  }
+}

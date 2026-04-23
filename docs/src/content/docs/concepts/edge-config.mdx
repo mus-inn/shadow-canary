@@ -1,0 +1,144 @@
+---
+title: Edge Config
+description: The shadow-configuration key schema — every field explained.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Shadow-canary stores all routing state in a single Edge Config key called `shadow-configuration`. The middleware reads this key on every request (with a 60-second in-process cache). The three workflows write to it on every deploy or canary tick.
+
+## Full schema
+
+```json
+{
+  "deploymentDomainProd": "https://my-app-abc123.vercel.app",
+  "deploymentDomainProdPrevious": "https://my-app-def456.vercel.app",
+  "deploymentDomainShadow": "https://my-app-xyz789.vercel.app",
+  "trafficShadowPercent": 1,
+  "trafficProdCanaryPercent": 42,
+  "shadowForceIPs": ["203.0.113.42"],
+  "canaryPaused": false,
+  "canaryStartedAt": "2024-11-15T08:00:00Z"
+}
+```
+
+## Field reference
+
+### `deploymentDomainProd`
+
+| | |
+|---|---|
+| Type | `string` (URL) |
+| Written by | `deploy-prod.yml` |
+| Read by | Middleware (for internal bookkeeping), admin UI |
+| Example | `https://my-app-abc123.vercel.app` |
+
+The per-deployment URL of the current production deploy — the deploy that received `vercel promote`. This is the deploy where the middleware runs. It is stored here so the admin UI can display it without a Vercel API call.
+
+### `deploymentDomainProdPrevious`
+
+| | |
+|---|---|
+| Type | `string` (URL) or absent |
+| Written by | `deploy-prod.yml` (sets on canary start, clears on `[skip-canary]`) |
+| Read by | Middleware (rewrite target for `prod-previous` bucket) |
+| Example | `https://my-app-def456.vercel.app` |
+
+The per-deployment URL of the previous production deploy. Present during a canary and kept after it completes at 100%, so in-flight sessions on `prod-previous` can finish their journey. Overwritten by the next `deploy-prod.yml` run.
+
+If this field is absent or empty, the middleware treats all prod traffic as `prod-new` (no canary in effect).
+
+### `deploymentDomainShadow`
+
+| | |
+|---|---|
+| Type | `string` (URL) |
+| Written by | `deploy-shadow.yml` |
+| Read by | Middleware (rewrite target for shadow bucket) |
+| Example | `https://my-app-xyz789.vercel.app` |
+
+The per-deployment URL of the current `master` deploy. Updated on every push to `master`. If this field is absent, shadow routing silently degrades — the middleware returns `NextResponse.next()`.
+
+### `trafficShadowPercent`
+
+| | |
+|---|---|
+| Type | `number` (0–100) |
+| Default | `1` |
+| Written by | `deploy-shadow.yml` (initializes to 1 if absent) |
+| Read by | Middleware |
+
+Percentage of requests routed to the shadow deploy. Typically `1`. Set to `0` as a kill-switch — the shadow deploy continues to exist but receives no traffic. Propagates within 60 seconds, no redeploy needed.
+
+### `trafficProdCanaryPercent`
+
+| | |
+|---|---|
+| Type | `number` (0–100) |
+| Default | `100` (no canary) |
+| Written by | `deploy-prod.yml` (resets on each deploy), `canary-ramp.yml` (increments) |
+| Read by | Middleware |
+
+Percentage of prod-bucket requests that go to the new deploy. The remainder goes to `deploymentDomainProdPrevious`.
+
+| Value | Meaning |
+|---|---|
+| `100` | No active canary — all prod traffic on new deploy |
+| `0` | Full rollback — all prod traffic on previous deploy |
+| `1`–`99` | Canary in progress |
+
+### `shadowForceIPs`
+
+| | |
+|---|---|
+| Type | `string[]` (IPv4 addresses) |
+| Default | `[]` |
+| Written by | Manual (Vercel dashboard or API) |
+| Read by | Middleware |
+
+List of IPv4 addresses that are always routed to the shadow deploy, bypassing random roll and cookie stickiness. Used to route office or dev-team traffic to shadow permanently. No cookie is set for IP-forced requests.
+
+<Aside type="caution">
+CIDR ranges are not supported — only exact IPv4 addresses. If your office uses a dynamic IP, you will need to update this field when it changes.
+</Aside>
+
+### `canaryPaused`
+
+| | |
+|---|---|
+| Type | `boolean` |
+| Default | `false` |
+| Written by | Admin UI (Pause/Resume buttons), `canary-ramp.yml` (sets `true` on SLO failure) |
+| Read by | `canary-ramp.yml` |
+
+When `true`, the canary cron skips the SLO check and bump. Traffic split is frozen at the current `trafficProdCanaryPercent`. Resume via the admin UI or by setting to `false` in Edge Config directly.
+
+### `canaryStartedAt`
+
+| | |
+|---|---|
+| Type | `string` (ISO 8601) or `null` |
+| Written by | `deploy-prod.yml` (on canary start), `canary-ramp.yml` (clears at 100%) |
+| Read by | Admin UI |
+
+Timestamp of when the current canary started. Used for display purposes in the admin UI. `null` means no active canary.
+
+## Cache TTL
+
+The middleware caches the Edge Config response in module memory for 60 seconds. Config changes take up to 60 seconds to propagate to warm middleware instances. Cold starts (new instances) always fetch from Edge Config directly.
+
+## Manual edits
+
+You can edit `shadow-configuration` directly in the Vercel dashboard (Storage > your store > Items). Common manual operations:
+
+- Set `trafficShadowPercent: 0` to kill the shadow (shadow still exists, gets no traffic)
+- Set `trafficProdCanaryPercent: 0` to roll back a canary manually
+- Add or remove IPs in `shadowForceIPs`
+- Set `canaryPaused: false` to resume a paused canary
+
+---
+
+**Related:**
+- [Routing](/shadow-canary/concepts/routing/) — how the middleware uses this config
+- [Workflows](/shadow-canary/reference/workflows/) — which fields each workflow writes
+- [Dashboard](/shadow-canary/reference/dashboard/) — admin UI reading and writing this config

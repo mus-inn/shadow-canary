@@ -1,0 +1,17 @@
+{
+  "name": "shadow-canary-docs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "devDependencies": {
+    "astro": "^4.16.0",
+    "@astrojs/starlight": "^0.28.0",
+    "rehype-mermaid": "^2.1.0",
+    "sharp": "^0.33.5"
+  }
+}

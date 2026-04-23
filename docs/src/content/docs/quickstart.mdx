@@ -1,0 +1,173 @@
+---
+title: Quickstart
+description: Install shadow-canary on a new Next.js project in about 10 minutes.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This guide covers the **greenfield** path: a fresh Next.js project that you want to shadow-and-canary from day one. For an existing project, see [Migration (manual)](/shadow-canary/install/migration-manual/).
+
+**Time:** about 10 minutes.
+
+## Prerequisites
+
+- A Vercel account (Pro or Enterprise for Skew Protection; see [Prerequisites](/shadow-canary/install/prerequisites/))
+- A GitHub account with GitHub Actions available
+- Node.js 20 or later
+- `pnpm`, `npm`, or `yarn`
+
+---
+
+<Steps>
+
+1. **Clone the template**
+
+   ```bash
+   git clone https://github.com/mus-inn/shadow-canary
+   cd shadow-canary/examples/greenfield
+   npm install
+   ```
+
+   Or use the GitHub template button on [github.com/mus-inn/shadow-canary](https://github.com/mus-inn/shadow-canary) to create a new repo pre-wired.
+
+2. **Set up Vercel project**
+
+   Import the repo in the Vercel dashboard. Then configure these settings in **Project Settings**:
+
+   | Setting | Value |
+   |---|---|
+   | Production Branch | `production` |
+   | Auto-assign Custom Production Domains | OFF |
+   | Deployment Protection | Disabled (POC) or Protection Bypass enabled (prod) |
+   | Skew Protection | ON, 7 days |
+
+   [screenshot: Vercel Settings > Git panel with Production Branch field set to "production" and Auto-assign OFF]
+
+   <Aside type="caution">
+   If you leave Auto-assign ON, Vercel will alias your custom domain to every prod deployment. The `deploy-prod.yml` workflow calls `vercel promote` manually — Auto-assign must be OFF or it will interfere.
+   </Aside>
+
+   Set the **default branch** in GitHub to `master` (not `main`). The canary cron workflow relies on running on the default branch.
+
+3. **Create an Edge Config store**
+
+   In the Vercel dashboard, go to **Storage** and create a new Edge Config store. Name it something like `shadow-config`.
+
+   Link the store to your project: in the store's settings, click **Connected Projects** and add your project.
+
+   [screenshot: Vercel Storage > Edge Config > Connected Projects panel]
+
+   Copy the store ID — it looks like `ecfg_xxxxxxxxxxxx`. You will need it for secrets.
+
+4. **Seed the Edge Config**
+
+   In the store's **Items** tab, add one item:
+
+   - Key: `shadow-configuration`
+   - Value (JSON):
+
+   ```json
+   {
+     "deploymentDomainProd": "",
+     "deploymentDomainProdPrevious": "",
+     "deploymentDomainShadow": "",
+     "trafficShadowPercent": 1,
+     "trafficProdCanaryPercent": 100,
+     "shadowForceIPs": []
+   }
+   ```
+
+   The workflows will overwrite the URL fields on every deploy. The empty strings here just ensure the key exists before the first push.
+
+   <Aside type="tip">
+   You can also leave the store empty — the workflows create the key on first run via an upsert operation.
+   </Aside>
+
+5. **Wire GitHub secrets**
+
+   In your GitHub repo, go to **Settings > Secrets and variables > Actions** and add:
+
+   | Secret | Where to find it |
+   |---|---|
+   | `VERCEL_TOKEN` | Vercel Account Settings > Tokens (scope: team, no expiry) |
+   | `VERCEL_ORG_ID` | `.vercel/project.json` — the `orgId` field, or Vercel team settings |
+   | `VERCEL_PROJECT_ID` | `.vercel/project.json` — the `projectId` field |
+   | `VERCEL_EDGE_CONFIG_ID` | Edge Config store ID from Step 3 (`ecfg_xxxx`) |
+   | `SLACK_WEBHOOK_URL` | Slack app > Incoming Webhooks (optional — skip if you don't use Slack) |
+
+   [screenshot: GitHub Settings > Secrets panel with the five secrets listed]
+
+6. **Wire Vercel environment variables**
+
+   In **Vercel Project Settings > Environment Variables**, add these for **Production** and **Preview** environments:
+
+   | Variable | Value |
+   |---|---|
+   | `VERCEL_API_TOKEN` | Same token as `VERCEL_TOKEN` above |
+   | `VERCEL_ORG_ID` | Same as the GitHub secret |
+   | `VERCEL_EDGE_CONFIG_ID` | Same as the GitHub secret |
+   | `ADMIN_USER` | Admin username (default: `admin`) |
+   | `ADMIN_PASS` | Admin password — choose something strong |
+   | `ADMIN_SESSION_SECRET` | A long random string for signing session cookies |
+
+   <Aside type="caution">
+   `VERCEL_PROJECT_ID` is auto-injected by Vercel at build time — you do not need to add it manually.
+   </Aside>
+
+   Generate a session secret:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+7. **First deploys**
+
+   Push to `master` to deploy the shadow slot:
+
+   ```bash
+   git push origin master
+   ```
+
+   This triggers `deploy-shadow.yml`, deploys the app, and writes `deploymentDomainShadow` into Edge Config. Watch the Actions tab — the first run takes about 90 seconds.
+
+   Then push to `production` to deploy the production slot. Use `[skip-canary]` on the first push because there is no previous prod URL to fall back to:
+
+   ```bash
+   git checkout production
+   git merge master -m "chore: bootstrap production [skip-canary]"
+   git push origin production
+   ```
+
+   This triggers `deploy-prod.yml`, promotes the deploy to your custom domain, and sets `trafficProdCanaryPercent: 100`.
+
+   <Aside type="tip">
+   The `[skip-canary]` marker tells the workflow to skip the ramp and go straight to 100%. Use it for any deploy where you have no previous prod to fall back to, or when you know the change is safe.
+   </Aside>
+
+8. **Verify**
+
+   Visit these three URLs (replace `your-domain.vercel.app` with your actual domain):
+
+   | URL | What to check |
+   |---|---|
+   | `https://your-domain.vercel.app/` | Home page loads normally |
+   | `https://your-domain.vercel.app/debug` | Shows branch, commit, deploy ID, and your bucket cookie |
+   | `https://your-domain.vercel.app/admin` | Login with `ADMIN_USER` / `ADMIN_PASS`; status shows "stable" |
+
+   On the `/debug` page, click **Force SHADOW** — reload and the page should show `master` as the branch. Click **Forcer PROD** to return.
+
+</Steps>
+
+## You're done
+
+Your project now has:
+
+- A permanent 1% shadow slot on `master` receiving real traffic.
+- A canary ramp on every merge to `production`, with SLO checks every 15 minutes.
+- Auto-rollback if SLO fails, with Slack notification (if configured).
+- A `/admin` dashboard to pause, resume, or cancel the canary.
+
+**Next steps:**
+
+- [Connect a real SLO source](/shadow-canary/reference/slo-integration/) (Sentry, Datadog, PostHog).
+- [Understand the routing logic](/shadow-canary/concepts/routing/) — sticky sessions, cookie values, the bot bypass.
+- [Read about the three workflows](/shadow-canary/reference/workflows/) and how to customize the ramp curve.

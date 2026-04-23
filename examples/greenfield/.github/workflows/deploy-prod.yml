@@ -1,0 +1,143 @@
+name: Deploy prod (production → start canary ramp)
+
+# Commit markers (mutually exclusive — skip wins):
+#   [skip-canary]  → promote to 100% immediately, no ramp, clear previous
+#   [keep-canary]  → replace new prod but keep pct/previous/startedAt so the
+#                    ramp continues from where it was (fix-in-place during a
+#                    canary without restarting at 0%)
+# Same effect via workflow_dispatch inputs skip_canary / keep_canary.
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+    inputs:
+      skip_canary:
+        description: 'Promote directly to 100% (no canary ramp)'
+        type: boolean
+        default: false
+      keep_canary:
+        description: 'Replace new prod but keep the current ramp state'
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SKIP_CANARY: ${{ contains(github.event.head_commit.message, '[skip-canary]') || inputs.skip_canary == true }}
+      KEEP_CANARY: ${{ contains(github.event.head_commit.message, '[keep-canary]') || inputs.keep_canary == true }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy production (Vercel builds remotely so VERCEL_DEPLOYMENT_ID
+                                  is available during next build → Skew
+                                  Protection injects ?dpl=<id> on static assets)
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prod --skip-domain --token=$VERCEL_TOKEN)
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "New prod deploy: $DEPLOY_URL"
+
+      - name: Promote new deploy to custom domain
+        run: |
+          vercel promote ${{ steps.deploy.outputs.url }} --token=$VERCEL_TOKEN --scope=$VERCEL_ORG_ID
+
+      - name: Update Edge Config (canary ramp or direct promote)
+        id: edge
+        run: |
+          CURRENT=$(curl -sf \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            | jq '[.[] | select(.key == "shadow-configuration")] | .[0].value // {}' \
+            || echo '{}')
+          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+
+          if [ "$SKIP_CANARY" = "true" ]; then
+            # Operator-forced promotion. Goes straight to 100% — no previous
+            # kept (no sticky tail), no startedAt, canary not paused.
+            MODE="direct"
+            MERGED=$(echo "$CURRENT" | jq \
+              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              '. + {
+                deploymentDomainProd: $newUrl,
+                deploymentDomainShadow: (.deploymentDomainShadow // $newUrl),
+                trafficShadowPercent: (.trafficShadowPercent // 1),
+                trafficProdCanaryPercent: 100,
+                canaryPaused: false,
+                shadowForceIPs: (.shadowForceIPs // [])
+              } | del(.canaryStartedAt) | del(.deploymentDomainProdPrevious)')
+          elif [ "$KEEP_CANARY" = "true" ]; then
+            # Fix-in-place: swap the new prod URL but leave ramp state alone
+            # (pct, previous, startedAt). Useful to push a correction while a
+            # canary is in-flight without restarting from 0%.
+            MODE="keep"
+            MERGED=$(echo "$CURRENT" | jq \
+              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              '. + {
+                deploymentDomainProd: $newUrl,
+                deploymentDomainShadow: (.deploymentDomainShadow // $newUrl),
+                trafficShadowPercent: (.trafficShadowPercent // 1),
+                shadowForceIPs: (.shadowForceIPs // [])
+              }')
+          else
+            # Bootstrap: no previous prod yet → go straight to 100%.
+            # Otherwise: start canary at 0% with previous kept for traffic
+            # fallback during the ramp.
+            MODE="canary"
+            MERGED=$(echo "$CURRENT" | jq \
+              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              --arg startedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '
+              (if (.deploymentDomainProd // "") == "" then
+                {deploymentDomainProd: $newUrl, trafficProdCanaryPercent: 100, canaryStartedAt: null}
+              else
+                {deploymentDomainProdPrevious: .deploymentDomainProd, deploymentDomainProd: $newUrl, trafficProdCanaryPercent: 0, canaryStartedAt: $startedAt}
+              end)
+              as $patch
+              | . + $patch + {
+                  deploymentDomainShadow: (.deploymentDomainShadow // $newUrl),
+                  trafficShadowPercent: (.trafficShadowPercent // 1),
+                  shadowForceIPs: (.shadowForceIPs // []),
+                  canaryPaused: false
+                }')
+          fi
+
+          curl -sS -X PATCH \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "pct=$(echo "$MERGED" | jq -r '.trafficProdCanaryPercent')" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          MODE='${{ steps.edge.outputs.mode }}'
+          PCT='${{ steps.edge.outputs.pct }}'
+          if [ "$MODE" = "direct" ]; then
+            TEXT=":rocket: Direct promote on \`${{ steps.deploy.outputs.url }}\` — \`[skip-canary]\` marker, 100% immediately, no ramp."
+          elif [ "$MODE" = "keep" ]; then
+            TEXT=":arrows_counterclockwise: Canary fix-in-place on \`${{ steps.deploy.outputs.url }}\` — \`[keep-canary]\` marker, ramp resumes at ${PCT}%."
+          elif [ "$PCT" = "100" ]; then
+            TEXT=":rocket: Bootstrap production deploy \`${{ steps.deploy.outputs.url }}\` — no previous prod, skipped canary (100%)."
+          else
+            TEXT=":traffic_light: Canary started on \`${{ steps.deploy.outputs.url }}\` — 0%, ramping via cron every 15 min (Europe/Paris: cap 20% until 12:00, then up to 100%)."
+          fi
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"

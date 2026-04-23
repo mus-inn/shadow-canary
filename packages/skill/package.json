@@ -1,0 +1,29 @@
+{
+  "name": "@shadow-canary/skill",
+  "version": "0.1.0",
+  "description": "Claude Code skill for operating the shadow-canary deployment pattern",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mus-inn/shadow-canary.git",
+    "directory": "packages/skill"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "shadow-canary-skill-install": "./bin/install.js"
+  },
+  "files": [
+    "bin",
+    "skills",
+    "README.md"
+  ],
+  "scripts": {
+    "install-skill": "node ./bin/install.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

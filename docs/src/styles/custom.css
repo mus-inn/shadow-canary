@@ -1,0 +1,41 @@
+:root,
+[data-theme='dark'] {
+  --sl-color-accent-low: #422006;
+  --sl-color-accent: #f97316;
+  --sl-color-accent-high: #fdba74;
+  --sl-color-white: #ededed;
+  --sl-color-gray-1: #e5e5e5;
+  --sl-color-gray-2: rgba(255, 255, 255, 0.62);
+  --sl-color-gray-3: rgba(255, 255, 255, 0.48);
+  --sl-color-gray-4: rgba(255, 255, 255, 0.24);
+  --sl-color-gray-5: rgba(255, 255, 255, 0.08);
+  --sl-color-gray-6: rgba(255, 255, 255, 0.035);
+  --sl-color-black: #0a0a0a;
+  --sl-color-bg: #0a0a0a;
+  --sl-color-bg-nav: #0a0a0a;
+  --sl-color-text-accent: #fdba74;
+  --sl-font: 'Inter Variable', Inter, -apple-system, system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+[data-theme='light'] {
+  --sl-color-accent: #c2410c;
+  --sl-color-accent-high: #9a3412;
+  --sl-color-text-accent: #c2410c;
+}
+
+/* Prefer dark by default */
+html:not([data-theme]) {
+  color-scheme: dark;
+}
+
+/* Tighter heading tracking to match app style */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.025em;
+}
+
+body {
+  letter-spacing: -0.005em;
+}

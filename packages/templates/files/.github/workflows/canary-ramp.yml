@@ -1,0 +1,168 @@
+name: Canary ramp (SLO-gated)
+
+# Runs every 15 min on the default branch. Reads the canary state from Edge
+# Config; if a canary is in progress (pct < 100), hits the SLO endpoint on the
+# new prod deploy twice (30s apart). Both 200 → bump; any failure → rollback
+# to 0% and Slack-notify.
+#
+# Ramp curve (Europe/Paris):
+#   - before 12:00 → cap at 20% (soft start, night-time safety)
+#   - from  12:00 → step up to 100% (reaches 100 by ~17:00)
+#   - step = +4 percentage points per tick
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: canary-ramp
+  cancel-in-progress: false
+
+jobs:
+  ramp:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      STEP: '4'
+    steps:
+      - name: Read current canary state from Edge Config
+        id: state
+        run: |
+          VALUE=$(curl -sf \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            | jq '[.[] | select(.key == "shadow-configuration")] | .[0].value // {}')
+
+          PROD_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProd // empty')
+          PREV_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProdPrevious // empty')
+          PCT=$(echo "$VALUE" | jq -r '.trafficProdCanaryPercent // 100')
+          PAUSED=$(echo "$VALUE" | jq -r '.canaryPaused // false')
+
+          echo "value<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$VALUE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "prod_url=$PROD_URL" >> "$GITHUB_OUTPUT"
+          echo "prev_url=$PREV_URL" >> "$GITHUB_OUTPUT"
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "paused=$PAUSED" >> "$GITHUB_OUTPUT"
+          echo "Canary state → pct=$PCT, paused=$PAUSED, prod=$PROD_URL, prev=$PREV_URL"
+
+      - name: Skip if no canary in progress or paused by operator
+        id: gate
+        run: |
+          PCT='${{ steps.state.outputs.pct }}'
+          PROD_URL='${{ steps.state.outputs.prod_url }}'
+          PAUSED='${{ steps.state.outputs.paused }}'
+          if [ -z "$PROD_URL" ]; then
+            echo "No deploymentDomainProd yet — nothing to canary. Exiting."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$PCT" = "100" ]; then
+            echo "Canary already at 100% — nothing to do."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$PAUSED" = "true" ]; then
+            echo "Canary paused by operator via admin UI — skipping bump."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+
+      - name: Run 2 SLO checks (30s apart) on new prod
+        id: slo
+        if: steps.gate.outputs.skip == '0'
+        run: |
+          URL='${{ steps.state.outputs.prod_url }}/api/slo'
+          case "$URL" in http*) ;; *) URL="https://$URL" ;; esac
+
+          OK=0
+          for i in 1 2; do
+            CODE=$(curl -s -o /tmp/slo_body.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
+            BODY=$(cat /tmp/slo_body.txt 2>/dev/null || true)
+            echo "SLO check $i → HTTP $CODE :: $BODY"
+            if [ "$CODE" = "200" ]; then OK=$((OK + 1)); fi
+            if [ "$i" = "1" ]; then sleep 30; fi
+          done
+
+          if [ "$OK" = "2" ]; then
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next percent (Europe/Paris time-gated cap)
+        id: compute
+        if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '1'
+        run: |
+          CURRENT='${{ steps.state.outputs.pct }}'
+          HOUR=$(TZ=Europe/Paris date +%-H)
+          if [ "$HOUR" -lt 12 ]; then CAP=20; else CAP=100; fi
+          NEXT=$((CURRENT + STEP))
+          if [ "$NEXT" -gt "$CAP" ]; then NEXT=$CAP; fi
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "cap=$CAP" >> "$GITHUB_OUTPUT"
+          echo "Bump: $CURRENT → $NEXT (step=$STEP, cap=$CAP at ${HOUR}h Europe/Paris)"
+
+      - name: Apply bump
+        if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '1'
+        run: |
+          NEXT='${{ steps.compute.outputs.next }}'
+          CURRENT_VALUE='${{ steps.state.outputs.value }}'
+          # At 100%, keep deploymentDomainProdPrevious in place so in-flight
+          # sessions assigned to 'prod-previous' can finish there. The key is
+          # only rotated by the next deploy-prod run. canaryStartedAt cleared
+          # because the canary is no longer "in progress" for UI purposes.
+          if [ "$NEXT" -ge 100 ]; then
+            MERGED=$(echo "$CURRENT_VALUE" | jq '. + {trafficProdCanaryPercent: 100, canaryStartedAt: null}')
+          else
+            MERGED=$(echo "$CURRENT_VALUE" | jq --argjson pct "$NEXT" '. + {trafficProdCanaryPercent: $pct}')
+          fi
+          curl -sS -X PATCH \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+
+      - name: Notify Slack — canary reached 100%
+        if: >
+          steps.gate.outputs.skip == '0' &&
+          steps.slo.outputs.ok == '1' &&
+          steps.compute.outputs.next == '100' &&
+          env.SLACK_WEBHOOK_URL != ''
+        run: |
+          TEXT=":white_check_mark: Canary reached 100% on \`${{ steps.state.outputs.prod_url }}\` — new users go straight to new prod; in-flight sessions on previous finish there until next deploy."
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Rollback to 0% on SLO failure
+        if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '0'
+        run: |
+          CURRENT_VALUE='${{ steps.state.outputs.value }}'
+          # Pause too so the cron doesn't auto-recover on a transient SLO flake —
+          # a human should look at Sentry and Resume via /admin if safe.
+          MERGED=$(echo "$CURRENT_VALUE" | jq '. + {trafficProdCanaryPercent: 0, canaryPaused: true}')
+          curl -sS -X PATCH \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+
+      - name: Notify Slack — SLO failure (rolled back)
+        if: >
+          steps.gate.outputs.skip == '0' &&
+          steps.slo.outputs.ok == '0' &&
+          env.SLACK_WEBHOOK_URL != ''
+        run: |
+          PCT='${{ steps.state.outputs.pct }}'
+          PROD_URL='${{ steps.state.outputs.prod_url }}'
+          TEXT=":rotating_light: Canary rolled back to 0% on \`$PROD_URL\` (was ${PCT}%). SLO failed — all prod traffic back on previous deploy. Check Sentry."
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"

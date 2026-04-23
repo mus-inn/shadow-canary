@@ -1,0 +1,66 @@
+---
+title: Troubleshooting
+description: Common symptoms, their causes, and how to fix them.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Symptom table
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| 404 on JS/CSS chunks after deploy | Skew Protection is OFF | Enable Skew Protection in Vercel Project Settings (Pro/Enterprise required) |
+| `/admin` shows "unconfigured" or fails to load Edge Config data | Edge Config store not linked to the project | Vercel dashboard > Storage > your store > Connected Projects — add your project |
+| Cross-deploy rewrites return 401 | Deployment Protection is blocking shadow/previous deploy URLs | Disable SSO Protection or enable Protection Bypass for Automation (see [Prerequisites](/shadow-canary/install/prerequisites/)) |
+| Canary cron does not fire | Default branch is not `master` | Rename default branch to `master` (GitHub Settings > Branches) or update the `on.push.branches` trigger in the workflow files |
+| Canary stuck at 4% (or any low %) | `canaryPaused: true` in Edge Config | Use the admin UI Resume button, or set `canaryPaused: false` directly in Edge Config |
+| Canary stuck at 0% after deploy | First deploy with no previous prod URL | Use `[skip-canary]` on first production push, or push again after the bootstrap deploy |
+| Shadow deploy gets 0% traffic | `trafficShadowPercent: 0` in Edge Config | Set `trafficShadowPercent: 1` in Edge Config (propagates in 60s) |
+| `/debug` page shows wrong branch | You are hitting the shadow or previous prod URL directly | This is expected — those deploys always show their own branch. Visit via the custom domain to see the routing in action |
+| Cookie does not stick across requests | Cookie set with wrong domain or `SameSite` mismatch | Ensure the middleware sets `sameSite: 'lax'` and `path: '/'`; check that the custom domain matches what the browser expects |
+| SLO check always fails | `/api/slo` returns non-200 | Check the endpoint response: `curl https://your-app.vercel.app/api/slo`. If it is a stub, it returns 200 by default — something is wrong with your custom implementation |
+| `vercel promote` fails in CI | Token does not have team scope or wrong org ID | Regenerate the token with team scope and verify `VERCEL_ORG_ID` matches the team's `orgId` in `.vercel/project.json` |
+| Admin login returns 401 | `ADMIN_USER` or `ADMIN_PASS` env var not set, or wrong value | Check Vercel Project Settings > Environment Variables. Defaults are `admin` / `12345` if vars are absent |
+| Edge Config reads fail at runtime | `EDGE_CONFIG` connection string not injected | Vercel injects this automatically when the store is linked. Re-link the store to the project and redeploy |
+| Middleware runs on shadow/previous deploy and routes again | `x-shadow-routed` header not set or stripped | Verify `rewriteTo` sets `x-shadow-routed: 1`. Check that no other middleware or proxy strips it before reaching the target deploy |
+| Rollback button in admin returns 500 | `VERCEL_API_TOKEN` not set or expired | Add/refresh `VERCEL_API_TOKEN` in Vercel env vars |
+
+## Canary stuck: detailed checklist
+
+If `trafficProdCanaryPercent` has not changed in over 15 minutes:
+
+1. Check GitHub Actions > Canary ramp — is the workflow running? Look for a failed or skipped run.
+2. In the failing run, check the "Skip if no canary" step — is `paused=true`? Use admin UI to resume.
+3. Check the "Run 2 SLO checks" step — what HTTP code is `/api/slo` returning?
+4. Verify `VERCEL_TOKEN` has not expired and `VERCEL_EDGE_CONFIG_ID` is correct.
+5. Manually trigger the workflow (Actions > Canary ramp > Run workflow) to test.
+
+## Shadow not routing
+
+If you visit `/debug` from multiple incognito windows and never get the shadow deploy:
+
+- Verify `deploymentDomainShadow` is set in Edge Config (not empty string)
+- Verify `trafficShadowPercent` is greater than 0
+- Check that the middleware is running on the production deploy (not preview) — `VERCEL_ENV` must be `production`
+- Bot detection may be filtering your client — check the user-agent
+
+At 1%, you need roughly 100 requests to statistically expect one shadow assignment. Use `shadowForceIPs` or the `/debug` Force Shadow button for testing.
+
+## SLO false positives
+
+If the canary rolls back but the deploy looks healthy:
+
+- The SLO endpoint may be timing out — the cron uses `--max-time 10`. If your check makes slow external API calls, it may be cut off.
+- The SLO endpoint may be returning 500 due to an unrelated dependency issue. Make the endpoint fail open if monitoring is unavailable.
+- Two checks 30 seconds apart is a small sample. If your error rate is naturally spiky (e.g. a scheduled job that briefly spikes errors), the check timing may coincide with a spike. Consider adding a moving average or increasing the check interval.
+
+<Aside type="tip">
+After an unexpected rollback, check the GitHub Actions log for the "Run 2 SLO checks" step. It prints the HTTP code and response body for each check, which usually tells you exactly why the check failed.
+</Aside>
+
+---
+
+**Related:**
+- [Workflows](/shadow-canary/reference/workflows/) — workflow internals and customization
+- [Edge Config](/shadow-canary/concepts/edge-config/) — field reference for manual edits
+- [Dashboard](/shadow-canary/reference/dashboard/) — Pause, Resume, Cancel controls

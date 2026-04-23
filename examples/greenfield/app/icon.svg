@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde047"/>
+      <stop offset="1" stop-color="#eab308"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#ea580c"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+  <ellipse cx="14" cy="21" rx="11" ry="6.5" fill="url(#body)"/>
+  <path d="M3.5 18.5 L1.2 16.5 L3.5 21.2 Z" fill="url(#body)"/>
+  <circle cx="22" cy="13" r="6.2" fill="url(#body)"/>
+  <ellipse cx="19.2" cy="9.8" rx="2.2" ry="1.1" fill="#fef08a" opacity="0.85"/>
+  <path d="M27.6 11.8 L30.8 13 L27.6 14.2 Z" fill="url(#beak)"/>
+  <path d="M27.6 13.5 L29.8 14.3 L27.6 15.1 Z" fill="#c2410c"/>
+  <circle cx="22.8" cy="11.4" r="1.1" fill="#0f172a"/>
+  <circle cx="23.1" cy="11.1" r="0.4" fill="#ffffff"/>
+  <path d="M8 20 Q12 23 16 20" stroke="#ca8a04" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.8"/>
+</svg>

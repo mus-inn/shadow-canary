@@ -1,0 +1,189 @@
+---
+title: Admin API
+description: Every endpoint exposed by the admin UI — method, path, auth, request body, response shape, and example curl.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The admin API is a set of Next.js Route Handlers under `app/admin/api/`. All endpoints require a valid session cookie obtained by logging in at `/admin/login`.
+
+<Aside type="caution">
+All admin API endpoints are excluded from the middleware matcher. They are always served by the current production deploy, never rewritten to shadow or previous.
+</Aside>
+
+## Authentication
+
+The session is a HMAC-signed cookie (`admin-session`) set at login. It expires after 8 hours.
+
+**Login:**
+
+```bash
+curl -c cookies.txt -X POST https://your-app.vercel.app/admin/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username": "admin", "password": "your-password"}'
+```
+
+Response: `302 Redirect` to `/admin` on success, `401` on failure.
+
+---
+
+## GET /admin/api/status
+
+Returns the current canary state from Edge Config.
+
+**Auth:** Session cookie required.
+
+**Response:**
+
+```json
+{
+  "deploymentDomainProd": "https://my-app-abc.vercel.app",
+  "deploymentDomainProdPrevious": "https://my-app-def.vercel.app",
+  "deploymentDomainShadow": "https://my-app-xyz.vercel.app",
+  "trafficShadowPercent": 1,
+  "trafficProdCanaryPercent": 42,
+  "shadowForceIPs": [],
+  "canaryPaused": false,
+  "canaryStartedAt": "2024-11-15T08:00:00Z"
+}
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt https://your-app.vercel.app/admin/api/status
+```
+
+---
+
+## POST /admin/api/pause
+
+Pauses the canary ramp. Sets `canaryPaused: true` in Edge Config. The cron will skip SLO checks and bumps until resumed.
+
+**Auth:** Session cookie required.
+
+**Request body:** None.
+
+**Response:**
+
+```json
+{ "ok": true, "canaryPaused": true }
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt -X POST https://your-app.vercel.app/admin/api/pause
+```
+
+---
+
+## POST /admin/api/resume
+
+Resumes a paused canary. Sets `canaryPaused: false`. The next cron tick will run normally.
+
+**Auth:** Session cookie required.
+
+**Request body:** None.
+
+**Response:**
+
+```json
+{ "ok": true, "canaryPaused": false }
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt -X POST https://your-app.vercel.app/admin/api/resume
+```
+
+---
+
+## POST /admin/api/cancel
+
+Cancels the canary. Sets `trafficProdCanaryPercent: 0` and `canaryPaused: true`. All prod traffic returns to `deploymentDomainProdPrevious`. Use this for a manual rollback.
+
+**Auth:** Session cookie required.
+
+**Request body:** None.
+
+**Response:**
+
+```json
+{ "ok": true, "trafficProdCanaryPercent": 0, "canaryPaused": true }
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt -X POST https://your-app.vercel.app/admin/api/cancel
+```
+
+<Aside type="tip">
+The next `deploy-prod.yml` run will overwrite the canary state. If you cancel a canary and want to try again with the same code, push an empty commit to `production` or trigger `deploy-prod.yml` manually from the Actions tab.
+</Aside>
+
+---
+
+## POST /admin/api/rollback
+
+Rolls back to a specific previous production deploy. Calls `vercel promote` to re-alias the custom domain, resets `deploymentDomainProd` to the target URL, clears `deploymentDomainProdPrevious`, and sets `trafficProdCanaryPercent: 100`.
+
+**Auth:** Session cookie required.
+
+**Request body:**
+
+```json
+{ "deploymentUrl": "https://my-app-old.vercel.app" }
+```
+
+**Response:**
+
+```json
+{ "ok": true, "deploymentDomainProd": "https://my-app-old.vercel.app" }
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt -X POST https://your-app.vercel.app/admin/api/rollback \
+  -H 'Content-Type: application/json' \
+  -d '{"deploymentUrl": "https://my-app-old.vercel.app"}'
+```
+
+---
+
+## GET /admin/api/deployments
+
+Lists the 20 most recent deployments for the `production` branch from the Vercel API. Used by the Rollback panel.
+
+**Auth:** Session cookie required.
+
+**Response:**
+
+```json
+{
+  "deployments": [
+    {
+      "uid": "dpl_xxxxx",
+      "url": "my-app-abc.vercel.app",
+      "created": 1700000000000,
+      "state": "READY",
+      "meta": { "githubCommitMessage": "feat: add checkout improvements" }
+    }
+  ]
+}
+```
+
+**Example:**
+
+```bash
+curl -b cookies.txt https://your-app.vercel.app/admin/api/deployments
+```
+
+---
+
+**Related:**
+- [Dashboard](/shadow-canary/reference/dashboard/) — the UI that calls these endpoints
+- [Edge Config](/shadow-canary/concepts/edge-config/) — the data model written by these endpoints

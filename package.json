@@ -1,0 +1,31 @@
+{
+  "name": "shadow-canary-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shadow-permanent 1% + SLO-gated canary ramp for Next.js on Vercel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mus-inn/shadow-canary.git"
+  },
+  "license": "MIT",
+  "author": "mus-inn",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "build": "pnpm -r --filter=./packages/* build",
+    "test": "pnpm -r --filter=./packages/* test",
+    "lint": "pnpm -r lint",
+    "dev:docs": "pnpm --filter=./docs dev",
+    "build:docs": "pnpm --filter=./docs build",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

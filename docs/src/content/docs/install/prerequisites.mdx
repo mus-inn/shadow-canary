@@ -1,0 +1,96 @@
+---
+title: Prerequisites
+description: Vercel plan requirements, Deployment Protection options, Edge Config setup, token scopes, and GitHub Actions quotas.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Before installing shadow-canary, verify that your Vercel plan and project configuration support the features it relies on.
+
+## Vercel plan requirements
+
+| Feature | Required | Plan |
+|---|---|---|
+| Skew Protection | Yes | Pro or Enterprise |
+| Edge Config | Yes | Hobby (limited) / Pro / Enterprise |
+| Deployment Protection bypass | Conditional | Pro or Enterprise |
+| Custom domains | Yes | All plans |
+| `vercel promote` CLI | Yes | All plans |
+
+<Aside type="caution">
+**Skew Protection requires Pro or Enterprise.** Without it, users in the middle of a canary ramp may receive JS chunks from the wrong deploy, causing client-side errors. If you are on Hobby, shadow-canary works functionally but you accept this risk.
+</Aside>
+
+## Deployment Protection
+
+By default, Vercel protects non-production deploys with SSO. This matters because shadow-canary rewrites traffic cross-deploy (prod → shadow URL, prod → previous URL). If Deployment Protection is active on those deploys, the rewrites will return 401.
+
+You have two options:
+
+**Option A — Disable SSO Protection (POC / non-sensitive content)**
+
+In Project Settings > Deployment Protection, set Vercel Authentication to Disabled. All deploy URLs are publicly accessible. This is the simplest setup for internal tools or content that is not sensitive.
+
+**Option B — Enable Protection Bypass for Automation (production with sensitive data)**
+
+In Project Settings > Deployment Protection, enable Protection Bypass for Automation. This generates a secret header token. Add it to your middleware's `rewriteTo` helper so cross-deploy rewrites include the bypass header.
+
+```typescript
+// In middleware.ts, add to the rewriteTo function:
+headers.set('x-vercel-protection-bypass', process.env.VERCEL_BYPASS_TOKEN ?? '');
+```
+
+Add `VERCEL_BYPASS_TOKEN` to your Vercel env vars.
+
+## Edge Config
+
+Edge Config is Vercel's global key-value store with sub-millisecond read latency at the edge. Shadow-canary uses it to store the `shadow-configuration` key, which the middleware reads on every request (with a 60-second in-memory cache).
+
+**Creating a store:**
+
+1. Vercel dashboard > Storage > Create > Edge Config
+2. Name it (e.g. `shadow-config`) and create
+3. Go to the store's Settings > Connected Projects and link your project
+4. Copy the store ID — it looks like `ecfg_xxxxxxxxxxxx`
+
+**Hobby plan limits:** The Hobby plan includes one Edge Config store with limited item size. Shadow-canary's single `shadow-configuration` key is well within the limits.
+
+**Propagation time:** Edge Config updates take up to 60 seconds to reach all warm middleware instances (the in-process cache TTL). Plan for this when doing manual overrides.
+
+## Vercel token scopes
+
+Create a token in Vercel Account Settings > Tokens. Recommended settings:
+
+- Scope: your team (not "full account" if possible)
+- No expiry, or set a renewal reminder
+
+The token needs permissions to:
+- Deploy to the project (`vercel deploy`)
+- Promote deploys (`vercel promote`)
+- Read and write Edge Config items (Vercel REST API)
+
+A single team-scoped token covers all three.
+
+## GitHub Actions quotas
+
+The canary ramp cron runs every 15 minutes, 24 hours a day. That is 96 workflow runs per day. Each run takes about 90 seconds (dominated by two 30-second SLO checks with a sleep between them).
+
+Monthly usage: approximately 96 × 30 = 2,880 minutes/month for a single project.
+
+GitHub's free tier includes 2,000 minutes/month for public repos and private repos on Free plans. For private repos, you may hit limits if running multiple canaries simultaneously.
+
+If you want to reduce cron frequency, change the schedule in `canary-ramp.yml`:
+
+```yaml
+schedule:
+  - cron: '*/30 * * * *'  # every 30 minutes instead of 15
+```
+
+Adjust `STEP` accordingly so the ramp still reaches 100% in a reasonable time.
+
+---
+
+**Next:**
+- [Via Claude Code](/shadow-canary/install/via-claude-code/) — fastest install path
+- [Via template](/shadow-canary/install/via-template/) — start from the greenfield example
+- [Migration (manual)](/shadow-canary/install/migration-manual/) — step-by-step for existing projects

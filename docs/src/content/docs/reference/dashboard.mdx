@@ -1,0 +1,92 @@
+---
+title: Dashboard
+description: The /admin UI — every card, button, and state explained.
+---
+
+The admin dashboard lives at `/admin`. It requires login at `/admin/login` with the credentials set in `ADMIN_USER` and `ADMIN_PASS` environment variables (defaults: `admin` / `12345` — change these).
+
+Sessions are HMAC-signed cookies valid for 8 hours.
+
+## Status card
+
+The top card shows the current canary state. The state label changes based on the Edge Config values:
+
+| State | Condition | Label displayed |
+|---|---|---|
+| Stable | `trafficProdCanaryPercent = 100` and no `deploymentDomainProdPrevious` | **Stable** |
+| Ramping | `trafficProdCanaryPercent < 100` and `canaryPaused = false` | **Ramping** — shows current % |
+| Paused | `trafficProdCanaryPercent < 100` and `canaryPaused = true` | **Paused** at N% |
+| Rolled back | `trafficProdCanaryPercent = 0` and `canaryPaused = true` | **Rolled back** |
+| Complete (sticky) | `trafficProdCanaryPercent = 100` and `deploymentDomainProdPrevious` is set | **Complete** — sticky tail active |
+
+"Complete (sticky)" means the canary finished but some users still have `prod-previous` cookies. They continue to be served by the old deploy until their cookie expires (24 hours) or they clear cookies.
+
+## Traffic distribution card
+
+Shows a live breakdown of the three traffic buckets:
+
+| Row | What it shows |
+|---|---|
+| Shadow | `trafficShadowPercent`% → `deploymentDomainShadow` |
+| New prod | `trafficProdCanaryPercent`% of remaining → `deploymentDomainProd` |
+| Previous prod | Remainder → `deploymentDomainProdPrevious` (if present) |
+
+Each row shows the deploy URL and the effective traffic share. Refresh the page to update.
+
+## Control buttons
+
+### Pause
+
+Sets `canaryPaused: true`. The cron stops bumping. The current traffic split is frozen.
+
+**When to use:** You notice anomalies in monitoring but the SLO check has not failed yet. Pause to stop exposing more users to the new deploy while you investigate.
+
+### Resume
+
+Sets `canaryPaused: false`. The next cron tick (within 15 minutes) resumes SLO checks and bumping.
+
+**When to use:** After investigating a pause and deciding the release is safe to continue.
+
+### Cancel
+
+Sets `trafficProdCanaryPercent: 0` and `canaryPaused: true`. All prod traffic returns to `deploymentDomainProdPrevious` immediately (within 60 seconds, limited by Edge Config propagation).
+
+**When to use:** Manual rollback when you know the release has a problem but the SLO check has not caught it (or you do not want to wait for the next cron tick).
+
+<br />
+
+After a Cancel, the system does not automatically recover. To restart the canary:
+1. Fix the issue in code
+2. Push to `master` → merge to `production`
+3. A new `deploy-prod.yml` run starts a fresh canary at 0%
+
+Or, to promote the cancelled deploy anyway (if it turns out the issue was a fluke): use the Rollback panel to manually promote it, then set `trafficProdCanaryPercent: 100` in Edge Config.
+
+## Rollback panel
+
+Lists the 20 most recent `production` deployments. Each row shows:
+- Git commit message (truncated)
+- Deploy URL
+- Timestamp
+- A **Rollback** button
+
+Clicking **Rollback** calls `POST /admin/api/rollback` with the deploy URL. This:
+1. Calls `vercel promote` to alias the custom domain to the selected deploy
+2. Updates `deploymentDomainProd` in Edge Config to the selected URL
+3. Clears `deploymentDomainProdPrevious` and `canaryStartedAt`
+4. Sets `trafficProdCanaryPercent: 100`
+
+The result is a clean stable state pointing at the chosen deploy. To run another canary from there, push to `production` again.
+
+## Shadow kill-switch
+
+There is no dedicated button for this — use Edge Config directly. Set `trafficShadowPercent: 0` in the Vercel dashboard or via the API. Propagation takes up to 60 seconds. The shadow deploy continues to exist but receives no traffic.
+
+To restore: set `trafficShadowPercent: 1` (or your desired percentage).
+
+---
+
+**Related:**
+- [Admin API](/shadow-canary/reference/admin-api/) — the API endpoints the dashboard calls
+- [Edge Config](/shadow-canary/concepts/edge-config/) — the data model the dashboard reads and writes
+- [Troubleshooting](/shadow-canary/ops/troubleshooting/) — common admin UI issues

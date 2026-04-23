@@ -1,0 +1,47 @@
+---
+title: Install via template
+description: Start from the greenfield template — the fastest way to get a wired project.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The `examples/greenfield` directory in the monorepo is a minimal Next.js App Router project pre-wired with shadow-canary: middleware, three workflows, `/debug`, `/admin`, and `/api/slo` stub.
+
+## Use the GitHub template
+
+Click **Use this template** on [github.com/mus-inn/shadow-canary](https://github.com/mus-inn/shadow-canary) to create a new repository. This copies the full monorepo including the greenfield example.
+
+Alternatively, clone and copy just the example:
+
+```bash
+git clone https://github.com/mus-inn/shadow-canary
+cp -r shadow-canary/examples/greenfield my-app
+cd my-app
+npm install
+```
+
+## What's included
+
+The `examples/greenfield` directory contains:
+
+```
+examples/greenfield/
+  .github/workflows/
+    deploy-shadow.yml       # push master → shadow deploy + Edge Config update
+    deploy-prod.yml         # push production → canary start
+    canary-ramp.yml         # cron every 15min → SLO check + bump/rollback
+  app/
+    (marketing pages, /debug, /admin)
+  middleware.ts             # edge routing logic
+  next.config.ts
+  vercel.json
+  package.json
+```
+
+## Next step
+
+Follow the [Quickstart](/shadow-canary/quickstart/) to wire up Vercel, Edge Config, GitHub secrets, and push your first deploys.
+
+<Aside type="tip">
+If you already have an existing Next.js project and do not want to start from scratch, see [Migration (manual)](/shadow-canary/install/migration-manual/) instead.
+</Aside>

@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env.*.local
+.vercel
+next-env.d.ts
+*.log
+.DS_Store
+
+# tool artifacts (not project files)
+.vexp/
+.python-version

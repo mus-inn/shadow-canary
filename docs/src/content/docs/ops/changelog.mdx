@@ -1,0 +1,22 @@
+---
+title: Changelog
+description: Release history for shadow-canary.
+---
+
+## v1.0.0
+
+Initial release.
+
+- Shadow slot: permanent 1% of production traffic on `master`, configurable via `trafficShadowPercent`
+- Canary ramp: SLO-gated 0→100% ramp on `production` merges, +4%/15min (Europe/Paris curve)
+- Three GitHub Actions workflows: `deploy-shadow.yml`, `deploy-prod.yml`, `canary-ramp.yml`
+- Edge Config key `shadow-configuration` as the single source of truth for routing state
+- Commit markers: `[skip-canary]` for direct promotes, `[keep-canary]` for fix-in-place
+- `/debug` page with bucket display and force-override buttons
+- `/admin` dashboard with Pause, Resume, Cancel, and 1-click rollback
+- `/api/slo` stub (replace with real signal — see [SLO integration](/shadow-canary/reference/slo-integration/))
+- Slack notifications on canary start, 100% completion, and rollback
+- IP allowlist (`shadowForceIPs`) for forcing specific IPs to shadow
+- Session sticky cookies (`shadow-bucket`) with 24-hour TTL
+
+See [GitHub releases](https://github.com/mus-inn/shadow-canary/releases) for updates.

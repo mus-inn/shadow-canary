@@ -1,0 +1,184 @@
+---
+title: Migration (manual)
+description: Add shadow-canary to an existing Next.js project step by step.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This guide adds shadow-canary to an existing Next.js 13.4+ App Router project. It covers branch setup, middleware merge, workflow setup, and common collision scenarios.
+
+## Scenarios
+
+- **New project, `main` branch** — rename `main` to `master`, create `production` from `master`.
+- **Existing project, `main` branch** — same rename, but you need to update branch protection rules and any existing CI that references `main`.
+- **Existing project with middleware** — merge the shadow-canary routing into your existing middleware.
+
+---
+
+<Steps>
+
+1. **Rename branches**
+
+   ```bash
+   # Rename main → master locally
+   git branch -m main master
+   git push origin master
+   git push origin --delete main
+
+   # Update the default branch in GitHub:
+   # Settings > Branches > Default branch → master
+   ```
+
+   Then create the `production` branch:
+
+   ```bash
+   git checkout -b production
+   git push origin production
+   ```
+
+   In Vercel Project Settings > Git, set Production Branch to `production`.
+
+   <Aside type="caution">
+   After renaming, update any branch protection rules in GitHub Settings > Branches. The canary ramp cron runs on the repository's default branch — it must be `master` (or update the workflow `on.schedule` trigger).
+   </Aside>
+
+2. **Configure Vercel project settings**
+
+   In the Vercel dashboard, make these one-time changes:
+
+   | Setting | Value | Why |
+   |---|---|---|
+   | Production Branch | `production` | Only pushes to `production` trigger prod deploys |
+   | Auto-assign Custom Production Domains | OFF | `deploy-prod.yml` calls `vercel promote` manually |
+   | Deployment Protection | Disabled or Bypass enabled | Cross-deploy rewrites need to reach shadow/previous without 401 |
+   | Skew Protection | ON, 7 days | Prevents JS chunk mismatches during canary |
+
+3. **Create and link Edge Config**
+
+   In Vercel Storage, create an Edge Config store. Link it to your project (store Settings > Connected Projects).
+
+   Install the SDK if not already present:
+
+   ```bash
+   npm install @vercel/edge-config
+   ```
+
+   Add the `EDGE_CONFIG` environment variable — Vercel injects it automatically when the store is linked to the project. Verify in Project Settings > Environment Variables that `EDGE_CONFIG` appears.
+
+4. **Install or merge middleware**
+
+   If you have no existing `middleware.ts`, copy the file from the template:
+
+   ```bash
+   cp node_modules/@shadow-canary/core/dist/middleware.ts middleware.ts
+   # or copy from examples/greenfield/middleware.ts in the monorepo
+   ```
+
+   **If you already have a middleware**, merge the shadow-canary logic using the higher-order wrapper from `@shadow-canary/core`:
+
+   ```typescript
+   import { NextRequest, NextResponse } from 'next/server';
+   import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+
+   async function myExistingMiddleware(req: NextRequest): Promise<NextResponse> {
+     // your existing logic
+     return NextResponse.next();
+   }
+
+   export default shadowCanaryMiddleware(myExistingMiddleware);
+
+   export const config = {
+     matcher: [
+       '/((?!api|_next/static|_next/image|favicon.ico|admin|.*\\..*).*)',
+     ],
+   };
+   ```
+
+   The `shadowCanaryMiddleware` wrapper runs shadow/canary routing first; if the request should bypass routing (already rewritten, not on the production deploy, bot UA), it falls through to your middleware. Otherwise it returns the routing response.
+
+   <Aside type="tip">
+   The middleware matcher excludes `/admin` by design — the admin UI always runs on the current prod deploy, never rewritten to shadow or previous.
+   </Aside>
+
+5. **Add the three workflows**
+
+   Copy `.github/workflows/` from the template or monorepo into your project:
+
+   - `deploy-shadow.yml` — triggers on push to `master`
+   - `deploy-prod.yml` — triggers on push to `production`
+   - `canary-ramp.yml` — cron `*/15 * * * *`
+
+   These files do not need modification for most projects. Customisable parameters are at the top of each file (see [Workflows reference](/shadow-canary/reference/workflows/)).
+
+6. **Add the pages**
+
+   Copy these from the template (adjust to your app directory structure):
+
+   - `app/debug/page.tsx` — shows routing state, cookie, IP, deploy ID; three bucket-force buttons
+   - `app/admin/` — login page, dashboard, API routes for Pause/Resume/Cancel/Rollback
+   - `app/api/slo/route.ts` — stub that returns 200; replace with a real check (see [SLO integration](/shadow-canary/reference/slo-integration/))
+
+7. **Set secrets and env vars**
+
+   GitHub secrets (Settings > Secrets and variables > Actions):
+
+   | Secret | Source |
+   |---|---|
+   | `VERCEL_TOKEN` | Vercel Account Settings > Tokens |
+   | `VERCEL_ORG_ID` | `.vercel/project.json` |
+   | `VERCEL_PROJECT_ID` | `.vercel/project.json` |
+   | `VERCEL_EDGE_CONFIG_ID` | Edge Config store ID (`ecfg_xxxx`) |
+   | `SLACK_WEBHOOK_URL` | Slack app > Incoming Webhooks (optional) |
+
+   Vercel env vars (Project Settings > Environment Variables, Production + Preview):
+
+   | Variable | Value |
+   |---|---|
+   | `VERCEL_API_TOKEN` | Same as `VERCEL_TOKEN` |
+   | `VERCEL_ORG_ID` | Same as GitHub secret |
+   | `VERCEL_EDGE_CONFIG_ID` | Same as GitHub secret |
+   | `ADMIN_USER` | Admin username |
+   | `ADMIN_PASS` | Admin password |
+   | `ADMIN_SESSION_SECRET` | Random string: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+
+</Steps>
+
+## Collision scenarios
+
+### `/admin` route conflict
+
+If your app already has a route at `/admin`, rename the shadow-canary admin to something like `/sc-admin` and update:
+
+- The middleware matcher exclusion (`admin` → `sc-admin`)
+- The `app/admin/` directory name
+- The `NEXT_PUBLIC_ADMIN_PATH` env var if the template uses one
+
+### `/api/slo` route conflict
+
+Rename the SLO endpoint to `/api/canary-slo` and update the `canary-ramp.yml` workflow:
+
+```yaml
+# In canary-ramp.yml, step "Run 2 SLO checks"
+URL='${{ steps.state.outputs.prod_url }}/api/canary-slo'
+```
+
+### Cookie name conflict
+
+If `shadow-bucket` conflicts with another cookie in your app, change the cookie name in `middleware.ts` (search for `shadow-bucket`) and keep it consistent across the middleware, admin API, and debug page.
+
+### Existing middleware matcher
+
+If your existing middleware matcher is more restrictive than the shadow-canary one, ensure it still covers the paths you want routed. The shadow-canary matcher uses:
+
+```
+/((?!api|_next/static|_next/image|favicon.ico|admin|.*\\..*).*
+```
+
+Adjust as needed — the key exclusions are `_next/static`, `_next/image` (to avoid routing static assets), and `admin`.
+
+---
+
+**Related:**
+- [Quickstart](/shadow-canary/quickstart/) — full walkthrough for greenfield projects
+- [Prerequisites](/shadow-canary/install/prerequisites/) — Vercel plan requirements
+- [Routing](/shadow-canary/concepts/routing/) — how the middleware decision tree works

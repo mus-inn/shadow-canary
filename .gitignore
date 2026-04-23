@@ -1,0 +1,12 @@
+node_modules
+dist
+.next
+.vercel
+.env
+.env.local
+*.log
+.DS_Store
+.turbo
+.astro
+docs/dist
+coverage

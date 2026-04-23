@@ -1,0 +1,60 @@
+name: Deploy shadow (master → shadow slot, 1% traffic)
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy shadow (Vercel builds remotely so VERCEL_DEPLOYMENT_ID
+                              is set during next build → Skew Protection
+                              injects ?dpl=<id> on static assets so
+                              cross-deploy asset fetches via the prod domain
+                              resolve to this deploy)
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prod --skip-domain --token=$VERCEL_TOKEN)
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "New shadow deploy: $DEPLOY_URL"
+
+      - name: Merge new shadow URL into shadow-configuration
+        run: |
+          CURRENT=$(curl -sf \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            | jq '[.[] | select(.key == "shadow-configuration")] | .[0].value // {}' \
+            || echo '{}')
+          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+
+          MERGED=$(echo "$CURRENT" | jq \
+            --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
+            '. + {
+              deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
+              deploymentDomainShadow: $shadowUrl,
+              trafficShadowPercent: (.trafficShadowPercent // 1),
+              trafficProdCanaryPercent: (.trafficProdCanaryPercent // 100),
+              shadowForceIPs: (.shadowForceIPs // [])
+            }')
+
+          curl -sS -X PATCH \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"

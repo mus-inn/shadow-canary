@@ -1,0 +1,80 @@
+---
+title: Install via Claude Code
+description: The fastest installation path — one prompt to wire up shadow-canary on an existing or new Next.js project.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+If you use [Claude Code](https://claude.ai/claude-code), this is the fastest path. One prompt hands off the entire installation to the AI — it reads the install guide, applies the changes to your project, and tells you exactly what to do in the Vercel dashboard.
+
+## The prompt
+
+Open Claude Code in your Next.js project directory, then paste:
+
+```
+Install shadow-canary on this project by following
+https://mus-inn.github.io/shadow-canary/llms-install.md
+
+When you need the following, ask me:
+- Vercel Project ID
+- Vercel Org/Team ID
+- Vercel Edge Config Store ID (create one in Vercel Storage if needed)
+- Admin password (or generate one)
+```
+
+That is all. Claude Code will read the install guide and get to work.
+
+## What Claude Code will do
+
+Claude Code works through the install guide and performs these steps automatically:
+
+- Copies the three GitHub Actions workflows into `.github/workflows/`
+- Creates or merges `middleware.ts` with the shadow-canary routing logic
+- Adds the required environment variable declarations to your project
+- Creates the `/debug` page and the `/admin` dashboard pages
+- Creates the `/api/slo` stub endpoint
+- Updates `next.config.ts` / `vercel.json` as needed
+- Generates a random `ADMIN_SESSION_SECRET`
+- Provides exact values for all secrets and env vars you need to set
+
+## What you must still do manually
+
+These steps require clicking in dashboards — Claude Code cannot do them for you:
+
+1. **Vercel dashboard** — Set Production Branch to `production`, turn Auto-assign OFF, enable Skew Protection (7 days), configure Deployment Protection.
+2. **Edge Config** — Create a store, link it to your project, copy the store ID.
+3. **GitHub secrets** — Add `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VERCEL_EDGE_CONFIG_ID`, and optionally `SLACK_WEBHOOK_URL`.
+4. **Vercel env vars** — Add `VERCEL_API_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_EDGE_CONFIG_ID`, `ADMIN_USER`, `ADMIN_PASS`, `ADMIN_SESSION_SECRET`.
+5. **Branch rename** — Rename your default branch from `main` to `master` if needed (GitHub Settings > Branches), or update the workflow triggers to match your branch name.
+
+<Aside type="tip">
+Claude Code will print a checklist of the manual steps with the exact values to use. Keep that output open while you work through the Vercel and GitHub dashboards.
+</Aside>
+
+## Alternative: install the skill for ongoing operations
+
+For long-term use — not just one-off installation — install the shadow-canary skill into Claude Code:
+
+```bash
+npx @shadow-canary/skill install
+```
+
+This registers the `/shadow-canary` slash command. Once installed, you can run:
+
+```
+/shadow-canary:install
+/shadow-canary:status
+/shadow-canary:rollback
+/shadow-canary:pause
+```
+
+The skill knows your project's Edge Config ID and Vercel token from the environment, so it can operate the canary without you providing them each time.
+
+See the [skill package README](https://github.com/mus-inn/shadow-canary/tree/master/packages/skill) for the full command list.
+
+---
+
+**Related:**
+- [Prerequisites](/shadow-canary/install/prerequisites/) — Vercel plan requirements before running the prompt
+- [Migration (manual)](/shadow-canary/install/migration-manual/) — the full manual path if you prefer to understand each step
+- [Quickstart](/shadow-canary/quickstart/) — greenfield setup with step-by-step instructions

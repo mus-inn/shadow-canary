@@ -1,0 +1,50 @@
+---
+title: shadow-canary
+description: Shadow-permanent 1% + SLO-gated canary for Next.js on Vercel.
+template: splash
+hero:
+  tagline: Shadow-permanent 1% + SLO-gated canary ramp. For Next.js on Vercel.
+  actions:
+    - text: Quickstart
+      link: /shadow-canary/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/mus-inn/shadow-canary
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What you get
+
+<CardGrid>
+  <Card title="Shadow slot always ON" icon="moon">
+    Continuous 1% of prod traffic on `master`. Every merge ships a shadow deploy — catch regressions before promoting.
+  </Card>
+  <Card title="Canary with auto-rollback" icon="rocket">
+    Merge `master` into `production`. New deploy starts at 0%, ramps +4%/15min if SLO stays green. Auto-rollback on failure.
+  </Card>
+  <Card title="Zero-lockin routing" icon="setting">
+    Edge Config + Next.js middleware. No third-party SDK. Change the ramp curve in YAML.
+  </Card>
+</CardGrid>
+
+## Why this pattern
+
+- Zero-downtime releases with stateful rollback to the previous deploy.
+- Sessions sticky by cookie — no user hops between versions mid-checkout.
+- Config-driven — Edge Config updates propagate in 60s or less, no redeploy.
+- Works with any Next.js 13.4+ App Router project.
+
+## Not for you if
+
+- You need per-user feature flags — use LaunchDarkly or Statsig instead.
+- Your stack is not Next.js on Vercel.
+- You want A/B testing with metrics attribution — this is reliability, not experimentation.
+
+<CardGrid>
+  <LinkCard title="Start the 10-min Quickstart" href="/shadow-canary/quickstart/" />
+  <LinkCard title="Install on Claude Code" href="/shadow-canary/install/via-claude-code/" />
+  <LinkCard title="Understand routing" href="/shadow-canary/concepts/routing/" />
+</CardGrid>

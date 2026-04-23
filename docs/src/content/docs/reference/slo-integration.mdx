@@ -1,0 +1,223 @@
+---
+title: SLO integration
+description: Replace the stub /api/slo with a real error-rate check — Sentry, Datadog, PostHog, or a custom metric.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+By default, `/api/slo` is a stub that always returns HTTP 200. The canary ramp only works as a safety gate if you replace it with a real health signal.
+
+The contract is simple: return HTTP 200 if the deploy is healthy, any other status code (or a timeout) if it is not. The cron checks twice, 30 seconds apart. Both must be 200 to bump.
+
+## What to measure
+
+The most useful signal for a canary gate is the **error rate of the new deploy**, compared to a baseline. Options:
+
+- **Absolute threshold** — fail if error rate exceeds N% in the last 5 minutes
+- **Relative threshold** — fail if error rate is more than 2x the previous deploy's rate
+- **Composite** — error rate + p99 latency + custom business metric
+
+A simple absolute threshold (e.g. "fail if error rate > 1% in last 5 minutes") is usually enough to start. Tune it once you understand your baseline.
+
+## Sentry
+
+Sentry provides a REST API to query error rates per release.
+
+```typescript
+// app/api/slo/route.ts
+import { NextResponse } from 'next/server';
+
+const SENTRY_TOKEN = process.env.SENTRY_AUTH_TOKEN!;
+const SENTRY_ORG = process.env.SENTRY_ORG!;
+const SENTRY_PROJECT = process.env.SENTRY_PROJECT!;
+const ERROR_RATE_THRESHOLD = 0.01; // 1%
+
+export async function GET() {
+  // Get the current Vercel deployment ID to scope the query
+  const release = process.env.VERCEL_DEPLOYMENT_ID;
+  if (!release) {
+    return NextResponse.json({ ok: true, reason: 'no release id' });
+  }
+
+  const url = new URL(
+    `https://sentry.io/api/0/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/stats/`
+  );
+  url.searchParams.set('query', `release:${release}`);
+  url.searchParams.set('stat', 'received');
+  url.searchParams.set('resolution', '1m');
+  url.searchParams.set('since', String(Math.floor(Date.now() / 1000) - 300)); // last 5m
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${SENTRY_TOKEN}` },
+  });
+
+  if (!res.ok) {
+    // If Sentry is unreachable, fail safe (do not bump)
+    return NextResponse.json({ ok: false, reason: 'sentry unreachable' }, { status: 503 });
+  }
+
+  const data = await res.json();
+  const errorRate = data.errorRate ?? 0;
+
+  if (errorRate > ERROR_RATE_THRESHOLD) {
+    return NextResponse.json(
+      { ok: false, errorRate, threshold: ERROR_RATE_THRESHOLD },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, errorRate });
+}
+```
+
+Add these env vars to Vercel (Production only — the SLO endpoint runs on prod deploys):
+
+| Variable | Value |
+|---|---|
+| `SENTRY_AUTH_TOKEN` | Sentry API token with project:read scope |
+| `SENTRY_ORG` | Your Sentry organization slug |
+| `SENTRY_PROJECT` | Your Sentry project slug |
+
+## Datadog
+
+Query a metric over the last 5 minutes using the Datadog Metrics API.
+
+```typescript
+// app/api/slo/route.ts
+import { NextResponse } from 'next/server';
+
+const DD_API_KEY = process.env.DD_API_KEY!;
+const DD_APP_KEY = process.env.DD_APP_KEY!;
+const DD_SITE = process.env.DD_SITE ?? 'datadoghq.com';
+const ERROR_RATE_THRESHOLD = 0.01;
+
+export async function GET() {
+  const now = Math.floor(Date.now() / 1000);
+  const from = now - 300; // 5 minutes
+
+  const deployId = process.env.VERCEL_DEPLOYMENT_ID ?? 'unknown';
+
+  const query = encodeURIComponent(
+    `sum:next.server.request.error{deployment_id:${deployId}}.as_rate()`
+  );
+
+  const res = await fetch(
+    `https://api.${DD_SITE}/api/v1/query?from=${from}&to=${now}&query=${query}`,
+    {
+      headers: {
+        'DD-API-KEY': DD_API_KEY,
+        'DD-APPLICATION-KEY': DD_APP_KEY,
+      },
+    }
+  );
+
+  if (!res.ok) {
+    return NextResponse.json({ ok: false, reason: 'datadog unreachable' }, { status: 503 });
+  }
+
+  const data = await res.json();
+  const points = data.series?.[0]?.pointlist ?? [];
+  const errorRate = points.length > 0
+    ? points.reduce((sum: number, [, v]: [number, number]) => sum + v, 0) / points.length
+    : 0;
+
+  if (errorRate > ERROR_RATE_THRESHOLD) {
+    return NextResponse.json({ ok: false, errorRate }, { status: 503 });
+  }
+
+  return NextResponse.json({ ok: true, errorRate });
+}
+```
+
+## PostHog
+
+Use PostHog's Insights API to query error events for the current deploy.
+
+```typescript
+// app/api/slo/route.ts
+import { NextResponse } from 'next/server';
+
+const PH_HOST = process.env.POSTHOG_HOST ?? 'https://app.posthog.com';
+const PH_API_KEY = process.env.POSTHOG_PERSONAL_API_KEY!;
+const PH_PROJECT = process.env.POSTHOG_PROJECT_ID!;
+const ERROR_COUNT_THRESHOLD = 10; // absolute error count in last 5 minutes
+
+export async function GET() {
+  const deployId = process.env.VERCEL_DEPLOYMENT_ID ?? '';
+
+  const body = {
+    events: [{ id: '$exception', math: 'total' }],
+    properties: deployId
+      ? [{ key: 'vercel_deployment_id', value: deployId, operator: 'exact' }]
+      : [],
+    date_from: '-5m',
+  };
+
+  const res = await fetch(`${PH_HOST}/api/projects/${PH_PROJECT}/insights/trend/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${PH_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    return NextResponse.json({ ok: false, reason: 'posthog unreachable' }, { status: 503 });
+  }
+
+  const data = await res.json();
+  const count = data.result?.[0]?.data?.at(-1) ?? 0;
+
+  if (count > ERROR_COUNT_THRESHOLD) {
+    return NextResponse.json({ ok: false, errorCount: count }, { status: 503 });
+  }
+
+  return NextResponse.json({ ok: true, errorCount: count });
+}
+```
+
+## Custom metric
+
+If you have a custom monitoring solution, implement the endpoint to match your signal. The only requirement: return 200 if healthy, non-200 otherwise.
+
+```typescript
+// Minimal custom check — e.g. query your own database for error counts
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+
+export async function GET() {
+  const errors = await db.errors.count({
+    where: {
+      createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+      deployId: process.env.VERCEL_DEPLOYMENT_ID,
+    },
+  });
+
+  if (errors > 5) {
+    return NextResponse.json({ ok: false, errors }, { status: 503 });
+  }
+
+  return NextResponse.json({ ok: true, errors });
+}
+```
+
+## Thresholds and tuning
+
+Start conservative and tighten once you understand your baseline:
+
+| Signal | Conservative | Aggressive |
+|---|---|---|
+| Error rate | 1% | 0.1% |
+| Error count (5m window) | 20 | 5 |
+| p99 latency increase | +500ms | +100ms |
+
+**Fail safe:** If the SLO endpoint itself is unreachable (network error, timeout, 500 from a dependency), return 503. The cron treats any non-200 as a failure and does not bump. This prevents a broken monitoring system from allowing a bad canary to complete.
+
+**Query the new deploy, not the previous:** Scope your metrics to `process.env.VERCEL_DEPLOYMENT_ID`. Without scoping, you might measure the healthy previous deploy's metrics and mask a broken new deploy.
+
+---
+
+**Related:**
+- [Workflows](/shadow-canary/reference/workflows/) — how the cron calls this endpoint
+- [Troubleshooting](/shadow-canary/ops/troubleshooting/) — SLO check failures and false positives

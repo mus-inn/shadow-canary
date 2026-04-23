@@ -1,0 +1,54 @@
+{
+  "name": "@shadow-canary/core",
+  "version": "0.1.0",
+  "description": "Runtime primitives for shadow-canary deployment pattern on Vercel",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mus-inn/shadow-canary.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./edge": {
+      "types": "./dist/edge.d.ts",
+      "import": "./dist/edge.js"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "next": ">=13.4.0",
+    "@vercel/edge-config": ">=1.0.0",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@vercel/edge-config": "^1",
+    "next": "^15",
+    "tsup": "^8",
+    "typescript": "^5.6",
+    "vitest": "^2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
