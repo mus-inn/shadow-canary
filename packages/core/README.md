@@ -1,4 +1,4 @@
-# @shadow-canary/core
+# @dotworld/shadow-canary-core
 
 Runtime primitives for the shadow-canary deployment pattern on Vercel.
 
@@ -10,13 +10,13 @@ real-time configuration and HMAC-based admin sessions.
 
 | Import path | Runtime | What it exports |
 |---|---|---|
-| `@shadow-canary/core` | Node.js only | Everything — Vercel REST wrappers, HMAC session helpers, types |
-| `@shadow-canary/core/edge` | Edge + Node | `getShadowConfig`, `shadowCanaryMiddleware`, types |
+| `@dotworld/shadow-canary-core` | Node.js only | Everything — Vercel REST wrappers, HMAC session helpers, types |
+| `@dotworld/shadow-canary-core/edge` | Edge + Node | `getShadowConfig`, `shadowCanaryMiddleware`, types |
 
 ## Installation
 
 ```bash
-pnpm add @shadow-canary/core
+pnpm add @dotworld/shadow-canary-core
 ```
 
 Peer dependencies (already installed in a Next.js project):
@@ -31,7 +31,7 @@ pnpm add next @vercel/edge-config
 
 ```ts
 // middleware.ts
-import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const config = {
@@ -48,7 +48,7 @@ export async function middleware(req: NextRequest) {
 
 ```ts
 // middleware.ts
-import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function middleware(req: NextRequest) {
@@ -68,7 +68,7 @@ export async function middleware(req: NextRequest) {
 ### Reading config from the edge
 
 ```ts
-import { getShadowConfig } from '@shadow-canary/core/edge';
+import { getShadowConfig } from '@dotworld/shadow-canary-core/edge';
 
 const cfg = await getShadowConfig(); // 60s in-memory TTL cache
 console.log(cfg?.trafficShadowPercent); // e.g. 1
@@ -82,7 +82,7 @@ import {
   patchShadowConfig,
   listDeployments,
   promoteDeployment,
-} from '@shadow-canary/core';
+} from '@dotworld/shadow-canary-core';
 
 // Read current config
 const cfg = await readShadowConfig();
@@ -107,7 +107,7 @@ import {
   verifySessionToken,
   SESSION_COOKIE,
   SESSION_MAX_AGE,
-} from '@shadow-canary/core';
+} from '@dotworld/shadow-canary-core';
 
 // In a login route handler
 if (verifyCredentials(user, pass)) {

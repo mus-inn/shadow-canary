@@ -37,9 +37,9 @@ importers:
 
   examples/greenfield:
     dependencies:
-      '@shadow-canary/core':
-        specifier: workspace:*
-        version: link:../../packages/core
+      '@dotworld/shadow-canary-core':
+        specifier: ^0.1.0
+        version: 0.1.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
       '@vercel/edge-config':
         specifier: ^1.4.0
         version: 1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
@@ -280,6 +280,16 @@ packages:
   '@ctrl/tinycolor@4.2.0':
     resolution: {integrity: sha512-kzyuwOAQnXJNLS9PSyrk0CWk35nWJW/zl/6KvnTBMFK65gm7U1/Z5BqjxeapjZCIhQcM/DsrEmcbRwDyXyXK4A==}
     engines: {node: '>=14'}
+
+  '@dotworld/shadow-canary-core@0.1.0':
+    resolution: {integrity: sha512-5vTVYqNMtamq/YJoDWYIq3Eya3z19eZ1m3ZQdOTnz0TxRts0p7kRTA+wa9w3OEsCLS4ZKp4C2Fd+i+ma2Ui9Sw==}
+    peerDependencies:
+      '@vercel/edge-config': '>=1.0.0'
+      next: '>=13.4.0'
+      react: '>=18'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@emnapi/runtime@1.10.0':
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
@@ -3636,6 +3646,13 @@ snapshots:
       prettier: 2.8.8
 
   '@ctrl/tinycolor@4.2.0': {}
+
+  '@dotworld/shadow-canary-core@0.1.0(@vercel/edge-config@1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)))(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)':
+    dependencies:
+      '@vercel/edge-config': 1.4.3(next@15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
+      next: 15.5.15(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+    optionalDependencies:
+      react: 19.2.5
 
   '@emnapi/runtime@1.10.0':
     dependencies:

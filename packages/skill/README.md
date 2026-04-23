@@ -1,17 +1,17 @@
-# @shadow-canary/skill
+# @dotworld/shadow-canary-skill
 
 Claude Code skill for operating the shadow-canary deployment pattern on Next.js + Vercel projects.
 
 ## Installation
 
 ```bash
-npx @shadow-canary/skill install
+npx @dotworld/shadow-canary-skill install
 ```
 
 Or with force-reinstall:
 
 ```bash
-npx @shadow-canary/skill install --force
+npx @dotworld/shadow-canary-skill install --force
 ```
 
 This copies the skill into `~/.claude/skills/shadow-canary/`. Claude Code auto-discovers it and makes the slash commands available in any project session.

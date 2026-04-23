@@ -25,9 +25,9 @@ Or read [docs/install/via-claude-code](https://mus-inn.github.io/shadow-canary/i
 
 | Package | Purpose |
 |---|---|
-| [`@shadow-canary/core`](./packages/core) | Runtime: middleware composer, Edge Config helpers, Vercel API, HMAC session. |
-| [`@shadow-canary/templates`](./packages/templates) | File payload copied into target projects. |
-| [`@shadow-canary/skill`](./packages/skill) | Claude Code skill (slash commands) for operating the canary. |
+| [`@dotworld/shadow-canary-core`](./packages/core) | Runtime: middleware composer, Edge Config helpers, Vercel API, HMAC session. |
+| [`@dotworld/shadow-canary-templates`](./packages/templates) | File payload copied into target projects. |
+| [`@dotworld/shadow-canary-skill`](./packages/skill) | Claude Code skill (slash commands) for operating the canary. |
 
 ## Documentation
 

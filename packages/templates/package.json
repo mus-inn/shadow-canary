@@ -1,5 +1,5 @@
 {
-  "name": "@shadow-canary/templates",
+  "name": "@dotworld/shadow-canary-templates",
   "version": "0.1.0",
   "description": "File payload for shadow-canary, copyable into Next.js projects",
   "type": "module",

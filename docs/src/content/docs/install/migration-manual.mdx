@@ -70,15 +70,15 @@ This guide adds shadow-canary to an existing Next.js 13.4+ App Router project. I
    If you have no existing `middleware.ts`, copy the file from the template:
 
    ```bash
-   cp node_modules/@shadow-canary/core/dist/middleware.ts middleware.ts
+   cp node_modules/@dotworld/shadow-canary-core/dist/middleware.ts middleware.ts
    # or copy from examples/greenfield/middleware.ts in the monorepo
    ```
 
-   **If you already have a middleware**, merge the shadow-canary logic using the higher-order wrapper from `@shadow-canary/core`:
+   **If you already have a middleware**, merge the shadow-canary logic using the higher-order wrapper from `@dotworld/shadow-canary-core`:
 
    ```typescript
    import { NextRequest, NextResponse } from 'next/server';
-   import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+   import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 
    async function myExistingMiddleware(req: NextRequest): Promise<NextResponse> {
      // your existing logic

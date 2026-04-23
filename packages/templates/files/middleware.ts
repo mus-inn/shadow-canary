@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 
 export const config = {
   matcher: [

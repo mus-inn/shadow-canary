@@ -41,19 +41,19 @@ Detect package manager from lockfiles, then run:
 
 ```bash
 # npm
-npm install @shadow-canary/core @vercel/edge-config
+npm install @dotworld/shadow-canary-core @vercel/edge-config
 
 # pnpm (if pnpm-lock.yaml exists)
-pnpm add @shadow-canary/core @vercel/edge-config
+pnpm add @dotworld/shadow-canary-core @vercel/edge-config
 
 # yarn (if yarn.lock exists)
-yarn add @shadow-canary/core @vercel/edge-config
+yarn add @dotworld/shadow-canary-core @vercel/edge-config
 ```
 
 ### Step 2 — Copy template files
 
 ```bash
-npx @shadow-canary/templates copy .
+npx @dotworld/shadow-canary-templates copy .
 ```
 
 This writes: `middleware.ts`, `next.config.ts` (if absent), `vercel.json` (if absent), `.env.local.example`, `app/admin/**`, `app/api/admin/**`, `app/api/slo/route.ts`, `lib/admin-{auth,vercel}.ts`, `.github/workflows/{deploy-shadow,deploy-prod,canary-ramp}.yml`.
@@ -98,7 +98,7 @@ Only if Pre-flight detected an existing middleware file:
 
 ```ts
 import { NextResponse, type NextRequest } from 'next/server';
-import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 
 export async function middleware(req: NextRequest) {
   // ... existing logic (auth, i18n, etc.) ...
@@ -137,7 +137,7 @@ Write at project root:
 }
 ```
 
-Adjust `adminPath`/`sloPath` if renamed in Step 7. This file is read by the `@shadow-canary/skill` Claude Code skill.
+Adjust `adminPath`/`sloPath` if renamed in Step 7. This file is read by the `@dotworld/shadow-canary-skill` Claude Code skill.
 
 ### Step 9 — Update .gitignore
 

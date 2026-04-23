@@ -43,7 +43,7 @@ function rewriteTo(
  *
  * @example
  * // middleware.ts in the host project
- * import { shadowCanaryMiddleware } from '@shadow-canary/core/edge';
+ * import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
  * import { NextRequest, NextResponse } from 'next/server';
  *
  * export async function middleware(req: NextRequest) {

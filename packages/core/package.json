@@ -1,5 +1,5 @@
 {
-  "name": "@shadow-canary/core",
+  "name": "@dotworld/shadow-canary-core",
   "version": "0.1.0",
   "description": "Runtime primitives for shadow-canary deployment pattern on Vercel",
   "repository": {

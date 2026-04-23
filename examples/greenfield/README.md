@@ -4,7 +4,7 @@ This is the canonical reference implementation of the shadow-canary deployment p
 
 ## What's in here
 
-- `middleware.ts` — uses `shadowCanaryMiddleware` from `@shadow-canary/core/edge`
+- `middleware.ts` — uses `shadowCanaryMiddleware` from `@dotworld/shadow-canary-core/edge`
 - `app/admin/**` — full dashboard (login, canary control, rollback, force-buckets, phase diagram)
 - `app/api/admin/**` — admin API endpoints (state, deployments, pause, resume, promote, cancel, step, rollback, shadow-percent)
 - `app/api/slo/route.ts` — SLO health check (stub → wire Sentry/DD later)

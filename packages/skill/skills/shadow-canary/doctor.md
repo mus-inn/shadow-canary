@@ -7,7 +7,7 @@ For each check, report PASS or FAIL with a one-line remediation hint on failure.
 Checks:
 1. `.shadow-canary.json` exists and contains required fields:
    `vercelProjectId`, `vercelOrgId`, `edgeConfigId`, `adminUrl`, `sloPath`, `adminPath`.
-2. `middleware.ts` (or `middleware.js`) exists and imports from `@shadow-canary/core/edge`
+2. `middleware.ts` (or `middleware.js`) exists and imports from `@dotworld/shadow-canary-core/edge`
    or calls `shadowCanaryMiddleware`.
 3. `.env.local` contains all required variables:
    `VERCEL_API_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_EDGE_CONFIG_ID`, `ADMIN_USER`, `ADMIN_PASS`, `ADMIN_SESSION_SECRET`.
