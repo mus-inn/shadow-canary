@@ -27,5 +27,10 @@
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@astrojs/sitemap@3.7.2": "patches/@astrojs__sitemap@3.7.2.patch"
+    }
   }
 }

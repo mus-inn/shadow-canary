@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@astrojs/sitemap@3.7.2':
+    hash: yacupxzgokrwxjc3tsysgbz7za
+    path: patches/@astrojs__sitemap@3.7.2.patch
+
 importers:
 
   .:
@@ -3314,7 +3319,7 @@ snapshots:
     dependencies:
       prismjs: 1.30.0
 
-  '@astrojs/sitemap@3.7.2':
+  '@astrojs/sitemap@3.7.2(patch_hash=yacupxzgokrwxjc3tsysgbz7za)':
     dependencies:
       sitemap: 9.0.1
       stream-replace-string: 2.0.0
@@ -3323,7 +3328,7 @@ snapshots:
   '@astrojs/starlight@0.28.6(astro@4.16.19(@types/node@24.12.2)(rollup@4.60.2)(typescript@5.9.3))':
     dependencies:
       '@astrojs/mdx': 3.1.9(astro@4.16.19(@types/node@24.12.2)(rollup@4.60.2)(typescript@5.9.3))
-      '@astrojs/sitemap': 3.7.2
+      '@astrojs/sitemap': 3.7.2(patch_hash=yacupxzgokrwxjc3tsysgbz7za)
       '@pagefind/default-ui': 1.5.2
       '@types/hast': 3.0.4
       '@types/mdast': 4.0.4

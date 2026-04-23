@@ -1,0 +1,13 @@
+diff --git a/dist/index.js b/dist/index.js
+index 248b1fcac4c0bc3ccca41d023a71e31f3bb9b727..d445f85ada514a36e3d656e521f14aca3058981e 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -82,7 +82,7 @@ const createPlugin = (options) => {
+               }
+             }
+           };
+-          const routeUrls = _routes.reduce((urls, r) => {
++          const routeUrls = (_routes || []).reduce((urls, r) => {
+             if (r.type !== "page") return urls;
+             addRouteUrl(urls, r);
+             for (const fallbackRoute of r.fallbackRoutes ?? []) {
