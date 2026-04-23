@@ -19,8 +19,10 @@ Checks:
    `.github/workflows/deploy-prod.yml`
    `.github/workflows/canary-ramp.yml`
 7. Admin API is reachable: login → GET /api/admin/state → returns valid ShadowConfig (non-null).
-8. Edge Config key `shadow-configuration` is populated (verify via /api/admin/state response;
-   if config is null, report that Edge Config may be empty or not linked).
+8. Edge Config key `shadow-<repo-slug>-canary` is populated (verify via /api/admin/state response;
+   derive the expected key from the `origin` git remote, e.g. for `owner/my-app` expect
+   `shadow-my-app-canary`. If config is null, report that Edge Config may be empty, not linked,
+   or the deploy workflows have not run yet).
 9. Git branch `master` exists locally or on origin.
 10. Git branch `production` exists locally or on origin.
 11. Default branch on the remote is `master` (required for canary-ramp.yml cron to trigger).

@@ -12,15 +12,6 @@ export type ShadowCanaryMiddlewareOptions = {
   /** Max-age in seconds for the sticky bucket cookie. Default: 86400 (24h) */
   cookieMaxAge?: number;
   /**
-   * Edge Config key holding this project's ShadowConfig payload.
-   * Default: resolved from `SHADOW_CANARY_KEY` env var, else `'shadow-configuration'`.
-   *
-   * Use a project-specific key (e.g. `shadow-configuration-<app>`) when
-   * sharing one Edge Config store across multiple projects, typically to
-   * sidestep Vercel Pro's 3-store limit.
-   */
-  configKey?: string;
-  /**
    * Vercel Deployment Protection bypass secret. Injected on the rewrite as
    * `x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie: samesitenone`
    * so shadow / previous-prod deployment URLs pass password / SSO protection.
@@ -56,6 +47,16 @@ function getClientIP(req: NextRequest): string | null {
   const fwd = req.headers.get('x-forwarded-for');
   if (fwd) return fwd.split(',')[0]?.trim() ?? null;
   return req.headers.get('x-real-ip');
+}
+
+let warnedLocalDevFailure = false;
+function warnLocalDevFailureOnce(err: unknown): void {
+  if (warnedLocalDevFailure) return;
+  warnedLocalDevFailure = true;
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn(
+    `[shadow-canary] middleware passthrough (VERCEL_ENV != 'production'): ${msg}`,
+  );
 }
 
 function rewriteTo(
@@ -144,7 +145,17 @@ export async function shadowCanaryMiddleware(
     return null;
   }
 
-  const cfg = await getShadowConfig(opts?.configKey);
+  // Hard-fail in production so misconfigs surface immediately (the whole point
+  // of the strict derivation); in local `next dev` (VERCEL_ENV unset) we fall
+  // through to passthrough with a one-time warn so the app stays usable.
+  let cfg: Awaited<ReturnType<typeof getShadowConfig>>;
+  try {
+    cfg = await getShadowConfig();
+  } catch (err) {
+    if (process.env['VERCEL_ENV'] === 'production') throw err;
+    warnLocalDevFailureOnce(err);
+    return null;
+  }
   if (!cfg) return null;
 
   const clientIP = getClientIP(req);

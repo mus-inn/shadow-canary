@@ -3,6 +3,29 @@ title: Changelog
 description: Release history for shadow-canary.
 ---
 
+## v0.3.0
+
+**Breaking change** — the Edge Config key is now derived deterministically from the repo slug as `shadow-<repo-slug>-canary` on both sides: runtime reads `VERCEL_GIT_REPO_SLUG` (auto-injected by Vercel), CI reads `github.event.repository.name` / `$GITHUB_REPOSITORY`.
+
+- Removes the class of bugs where the deploy workflow and middleware read/write different keys on a shared store
+- `SHADOW_CANARY_KEY` env var and GH Actions secret are no longer used (ignored if present)
+- `configKey` option on `shadowCanaryMiddleware` + `getShadowConfig/readShadowConfig/patchShadowConfig` has been removed
+- `DEFAULT_CONFIG_KEY` export removed — see `resolveConfigKey()` (now takes no arguments)
+- Pre-flight "Verify SHADOW_CANARY_KEY consistency" step removed from workflows — no longer possible to desync by construction
+- Local dev must set `VERCEL_GIT_REPO_SLUG` in `.env.local` (or run `vercel env pull`); middleware logs a one-time warn + passes through in non-production, throws in production
+- `patchShadowConfig` now rejects writes > 8 KB to protect shared stores from one tenant blowing the 64 KB store cap
+- Workflows gain a shared `concurrency: shadow-canary-${{ github.repository }}` group so deploy + ramp can't race on the same key
+
+**Upgrading an existing project:**
+
+1. Bump `@dotworld/shadow-canary-core` to `^0.3.0`.
+2. Re-copy the workflows: `npx @dotworld/shadow-canary-templates@latest copy . --force` on the `.github/workflows/` dir.
+3. Remove the `SHADOW_CANARY_KEY` GitHub Actions secret and Vercel env var (both ignored now).
+4. **Copy your Edge Config value to the new key.** In the Edge Config store's Items tab, duplicate the value from `shadow-configuration` (or your custom key) into a new item at `shadow-<repo-slug>-canary`. Without this step, the middleware reads `null` on the first post-upgrade deploy — the next `deploy-shadow.yml` run will repopulate `deploymentDomainShadow`, `trafficShadowPercent`, `trafficProdCanaryPercent`, but any custom `shadowForceIPs` entries need to be carried manually.
+5. For local dev: add `VERCEL_GIT_REPO_SLUG=<your-repo-slug>` to `.env.local` (or run `vercel env pull`).
+
+See the [core changelog](https://github.com/mus-inn/shadow-canary/blob/master/packages/core/CHANGELOG.md) for the full API diff.
+
 ## v1.0.0
 
 Initial release.
@@ -10,7 +33,7 @@ Initial release.
 - Shadow slot: permanent 1% of production traffic on `master`, configurable via `trafficShadowPercent`
 - Canary ramp: SLO-gated 0→100% ramp on `production` merges, +4%/15min (Europe/Paris curve)
 - Three GitHub Actions workflows: `deploy-shadow.yml`, `deploy-prod.yml`, `canary-ramp.yml`
-- Edge Config key `shadow-configuration` as the single source of truth for routing state
+- Single Edge Config key (derived from repo slug) as the source of truth for routing state
 - Commit markers: `[skip-canary]` for direct promotes, `[keep-canary]` for fix-in-place
 - `/debug` page with bucket display and force-override buttons
 - `/admin` dashboard with Pause, Resume, Cancel, and 1-click rollback

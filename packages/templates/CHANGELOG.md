@@ -1,5 +1,18 @@
 # @dotworld/shadow-canary-templates
 
+## 0.3.0
+
+### Major Changes
+
+- **BREAKING**: workflows now derive the Edge Config key from the repo slug instead of a configurable `SHADOW_CANARY_KEY` secret.
+
+  - `deploy-shadow.yml` and `deploy-prod.yml` set `SHADOW_CANARY_KEY: shadow-${{ github.event.repository.name }}-canary` at the job env level.
+  - `canary-ramp.yml` derives it in a shell step from `$GITHUB_REPOSITORY` (scheduled events don't populate `github.event.repository.name`).
+  - The pre-flight "Verify SHADOW_CANARY_KEY consistency with Vercel project env" step has been removed — it's no longer possible for the two sides to disagree by construction.
+  - `.env.local.example` replaces the `SHADOW_CANARY_KEY` hint with `VERCEL_GIT_REPO_SLUG` (needed locally to match the auto-injected Vercel value).
+
+  Pair with `@dotworld/shadow-canary-core@0.3.0`. See the core changelog for migration steps.
+
 ## 0.2.4
 
 ### Patch Changes

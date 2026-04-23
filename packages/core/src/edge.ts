@@ -3,7 +3,6 @@
 export * from './types.js';
 export {
   getShadowConfig,
-  DEFAULT_CONFIG_KEY,
   resolveConfigKey,
   clearConfigCache,
 } from './edge-config/read.js';

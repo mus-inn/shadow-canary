@@ -1,5 +1,33 @@
 # @dotworld/shadow-canary-core
 
+## 0.3.0
+
+### Major Changes
+
+- **BREAKING**: the Edge Config key is no longer configurable. It is now derived deterministically from the repo slug as `shadow-<slug>-canary` on both sides:
+
+  - **Runtime (middleware)** reads `VERCEL_GIT_REPO_SLUG` (auto-injected by Vercel on every deploy).
+  - **CI (GH Actions workflows)** reads `github.event.repository.name` for push/dispatch events and `$GITHUB_REPOSITORY` for scheduled events.
+
+  This removes by construction the silent-mismatch bug class that the 0.2.4 guardrails were detecting (workflow writes to one key, middleware reads another). The pre-flight verification steps in the workflows are no longer needed and have been removed.
+
+  **Removed APIs:**
+
+  - `DEFAULT_CONFIG_KEY` export (value was `'shadow-configuration'`)
+  - `configKey?: string` option on `ShadowCanaryMiddlewareOptions`
+  - `configKey?: string` argument on `getShadowConfig()`, `readShadowConfig()`, `patchShadowConfig()`
+  - `resolveConfigKey(explicit?: string)` signature simplified — now takes no arguments
+  - `SHADOW_CANARY_KEY` env var is ignored (runtime uses `VERCEL_GIT_REPO_SLUG` only)
+
+  **Migration:**
+
+  1. Re-copy the workflow files: `npx @dotworld/shadow-canary-templates@latest copy . --force`
+  2. Remove the `SHADOW_CANARY_KEY` secret from GitHub Actions (no longer read)
+  3. Remove `SHADOW_CANARY_KEY` from Vercel project env (no longer read)
+  4. Remove `configKey` from `.shadow-canary.json` (no longer used)
+  5. In local dev, add `VERCEL_GIT_REPO_SLUG=<repo-slug>` to `.env.local` (or run `vercel env pull`). The middleware throws at boot if it's missing.
+  6. Copy your current Edge Config value from the old key (e.g. `shadow-configuration` or `shadow-configuration-<app>`) into the new derived key (`shadow-<repo-slug>-canary`). The next `deploy-shadow` / `deploy-prod` run will keep it in sync from there.
+
 ## 0.2.4
 
 ### Patch Changes

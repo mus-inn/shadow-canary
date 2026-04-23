@@ -37,16 +37,13 @@ async function vercelFetch(
 }
 
 /**
- * Read the ShadowConfig payload from Edge Config. If `configKey` is omitted,
- * resolves via `SHADOW_CANARY_KEY` env var, then defaults to
- * `'shadow-configuration'`.
+ * Read the ShadowConfig payload from Edge Config. The key is derived from
+ * `VERCEL_GIT_REPO_SLUG` as `shadow-<slug>-canary` — see `resolveConfigKey`.
  */
-export async function readShadowConfig(
-  configKey?: string,
-): Promise<ShadowConfig | null> {
+export async function readShadowConfig(): Promise<ShadowConfig | null> {
   const err = checkEnv();
   if (err) throw new Error(err);
-  const key = resolveConfigKey(configKey);
+  const key = resolveConfigKey();
 
   const res = await vercelFetch(`/v1/edge-config/${EDGE_CONFIG_ID}/items`);
   if (!res.ok) throw new Error(`Edge Config read failed: ${res.status}`);
@@ -56,22 +53,35 @@ export async function readShadowConfig(
 }
 
 /**
- * Merge-patch the ShadowConfig at the resolved key. `opts.unset` deletes those
- * keys from the merged object before writing. Pass `opts.configKey` to target
- * a specific Edge Config entry (useful for multi-project stores).
+ * Merge-patch the ShadowConfig at the derived key. `opts.unset` deletes those
+ * keys from the merged object before writing.
  */
 export async function patchShadowConfig(
   patch: Partial<ShadowConfig>,
-  opts?: { unset?: (keyof ShadowConfig)[]; configKey?: string },
+  opts?: { unset?: (keyof ShadowConfig)[] },
 ): Promise<ShadowConfig> {
   const err = checkEnv();
   if (err) throw new Error(err);
-  const key = resolveConfigKey(opts?.configKey);
+  const key = resolveConfigKey();
 
-  const current = (await readShadowConfig(key)) ?? {};
+  const current = (await readShadowConfig()) ?? {};
   const merged: ShadowConfig = { ...current, ...patch };
   if (opts?.unset) {
     for (const k of opts.unset) delete merged[k];
+  }
+
+  // Reserve headroom on the store. Edge Config caps the whole store at 64 KB;
+  // a healthy ShadowConfig is ~500 bytes. Rejecting anything over 8 KB keeps
+  // one misbehaving project (bloated shadowForceIPs, accidental large field)
+  // from pushing a shared store over the limit and breaking every tenant.
+  const serialized = JSON.stringify(merged);
+  const size = new TextEncoder().encode(serialized).length;
+  const MAX_PAYLOAD_BYTES = 8 * 1024;
+  if (size > MAX_PAYLOAD_BYTES) {
+    throw new Error(
+      `Edge Config write rejected: payload is ${size} bytes, limit ${MAX_PAYLOAD_BYTES}. ` +
+        `Trim shadowForceIPs or other large fields; shared Edge Config stores cap at 64 KB total.`,
+    );
   }
 
   const res = await vercelFetch(`/v1/edge-config/${EDGE_CONFIG_ID}/items`, {

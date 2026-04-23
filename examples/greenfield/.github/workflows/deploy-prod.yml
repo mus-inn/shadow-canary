@@ -21,6 +21,12 @@ on:
         type: boolean
         default: false
 
+# Serialize with canary-ramp on the same repo so a deploy + bump can't race
+# on the same Edge Config key (read-modify-write).
+concurrency:
+  group: shadow-canary-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -30,7 +36,13 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SHADOW_CANARY_KEY: ${{ secrets.SHADOW_CANARY_KEY || 'shadow-configuration' }}
+      # Key is deterministic: derived from the repo slug on both sides.
+      # Middleware reads VERCEL_GIT_REPO_SLUG (auto-injected by Vercel);
+      # this workflow uses github.event.repository.name.
+      # NOTE: github.event.repository.name is populated for push/dispatch
+      # events but NOT for schedule events — see canary-ramp.yml for the
+      # schedule-safe shell variant if you ever add `on: schedule:` here.
+      SHADOW_CANARY_KEY: shadow-${{ github.event.repository.name }}-canary
       SKIP_CANARY: ${{ contains(github.event.head_commit.message, '[skip-canary]') || inputs.skip_canary == true }}
       KEEP_CANARY: ${{ contains(github.event.head_commit.message, '[keep-canary]') || inputs.keep_canary == true }}
     steps:

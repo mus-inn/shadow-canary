@@ -230,6 +230,35 @@ describe('shadowCanaryMiddleware — early returns (null = passthrough)', () => 
     );
     expect(result).toBeNull();
   });
+
+  it('passthrough + warn when getShadowConfig throws and VERCEL_ENV is not production (local next dev)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGetShadowConfig.mockRejectedValueOnce(
+      new Error('[shadow-canary] VERCEL_GIT_REPO_SLUG is not set'),
+    );
+    // VERCEL_ENV is unset (local dev).
+    const req = makeReq();
+    const result = await shadowCanaryMiddleware(
+      req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+    );
+    expect(result).toBeNull();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[0]).toMatch(/VERCEL_GIT_REPO_SLUG/);
+    warn.mockRestore();
+  });
+
+  it('rethrows when getShadowConfig throws and VERCEL_ENV is production', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    mockGetShadowConfig.mockRejectedValueOnce(
+      new Error('[shadow-canary] VERCEL_GIT_REPO_SLUG is not set'),
+    );
+    const req = makeReq();
+    await expect(
+      shadowCanaryMiddleware(
+        req as unknown as Parameters<typeof shadowCanaryMiddleware>[0],
+      ),
+    ).rejects.toThrow(/VERCEL_GIT_REPO_SLUG/);
+  });
 });
 
 describe('shadowCanaryMiddleware — IP force to shadow', () => {

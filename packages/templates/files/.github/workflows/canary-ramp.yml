@@ -15,8 +15,11 @@ on:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
+# Shared concurrency group with deploy-prod.yml: serializes deploy + bump
+# on the same Edge Config key so the read-modify-write in patchShadowConfig
+# can't race.
 concurrency:
-  group: canary-ramp
+  group: shadow-canary-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -28,33 +31,22 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SHADOW_CANARY_KEY: ${{ secrets.SHADOW_CANARY_KEY || 'shadow-configuration' }}
+      # GitHub injects GITHUB_REPOSITORY ("owner/repo") into every step by
+      # default; we restate it here so the derivation still works if someone
+      # later scopes env at the step level or containerizes the job.
+      GITHUB_REPOSITORY: ${{ github.repository }}
       STEP: '4'
     steps:
-      - name: Verify SHADOW_CANARY_KEY consistency with Vercel project env
-        # Guardrail: the middleware reads SHADOW_CANARY_KEY from the Vercel
-        # project env (with fallback to 'shadow-configuration'). This workflow
-        # writes to the key from the GH Actions secret (same fallback). If
-        # those two values diverge, the ramp bumps a key the middleware never
-        # reads — the classic silent "shadow/canary doesn't work" bug.
+      - name: Derive SHADOW_CANARY_KEY from repo slug
+        # Scheduled events don't populate github.event.repository.name, so we
+        # parse GITHUB_REPOSITORY ("owner/repo") in a shell step to stay
+        # correct across schedule + workflow_dispatch. The middleware reads
+        # the same slug from VERCEL_GIT_REPO_SLUG, so the key is deterministic
+        # on both sides.
         run: |
-          RESP=$(curl -s -o /tmp/vercel-envs.json -w "%{http_code}" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID&decrypt=true")
-          if [ "$RESP" != "200" ]; then
-            echo "::warning::Could not verify SHADOW_CANARY_KEY against Vercel (HTTP $RESP). Needs env:read on VERCEL_TOKEN — skipping guardrail."
-            exit 0
-          fi
-          VERCEL_KEY=$(jq -r '[.envs[] | select(.key == "SHADOW_CANARY_KEY" and (.target | index("production")))] | .[0].value // ""' /tmp/vercel-envs.json)
-          RUNTIME_KEY="${VERCEL_KEY:-shadow-configuration}"
-          if [ "$SHADOW_CANARY_KEY" != "$RUNTIME_KEY" ]; then
-            echo "::error::SHADOW_CANARY_KEY mismatch — this workflow would silently bump a key the middleware never reads."
-            echo "::error::  Workflow writes to: '$SHADOW_CANARY_KEY' (from secrets.SHADOW_CANARY_KEY or default)"
-            echo "::error::  Middleware reads:   '$RUNTIME_KEY' (from Vercel env SHADOW_CANARY_KEY or default)"
-            echo "::error::Fix: set the GH repo secret SHADOW_CANARY_KEY and the Vercel project env SHADOW_CANARY_KEY to the same value."
-            exit 1
-          fi
-          echo "✓ SHADOW_CANARY_KEY matches on both sides: '$SHADOW_CANARY_KEY'"
+          REPO_SLUG="${GITHUB_REPOSITORY##*/}"
+          echo "SHADOW_CANARY_KEY=shadow-${REPO_SLUG}-canary" >> "$GITHUB_ENV"
+          echo "Derived SHADOW_CANARY_KEY=shadow-${REPO_SLUG}-canary"
 
       - name: Read current canary state from Edge Config
         id: state

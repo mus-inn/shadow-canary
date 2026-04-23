@@ -44,7 +44,7 @@ Add `VERCEL_BYPASS_TOKEN` to your Vercel env vars.
 
 ## Edge Config
 
-Edge Config is Vercel's global key-value store with sub-millisecond read latency at the edge. Shadow-canary uses it to store the `shadow-configuration` key, which the middleware reads on every request (with a 60-second in-memory cache).
+Edge Config is Vercel's global key-value store with sub-millisecond read latency at the edge. Shadow-canary uses it to store a single key named `shadow-<repo-slug>-canary` (derived from `VERCEL_GIT_REPO_SLUG`), which the middleware reads on every request (with a 60-second in-memory cache).
 
 **Creating a store:**
 
@@ -53,9 +53,9 @@ Edge Config is Vercel's global key-value store with sub-millisecond read latency
 3. Go to the store's Settings > Connected Projects and link your project
 4. Copy the store ID — it looks like `ecfg_xxxxxxxxxxxx`
 
-**Hobby plan limits:** The Hobby plan includes one Edge Config store with limited item size. Shadow-canary's single `shadow-configuration` key is well within the limits.
+**Hobby plan limits:** The Hobby plan includes one Edge Config store with limited item size. Shadow-canary's single `shadow-<repo>-canary` key is well within the limits.
 
-**Pro plan limits:** Pro allows 3 stores per team. If you want to run shadow-canary on 4+ projects, share one store across them by giving each project its own sub-key. See [Sharing a store across projects](/shadow-canary/concepts/edge-config/#sharing-a-store-across-projects).
+**Pro plan limits:** Pro allows 3 stores per team. If you want to run shadow-canary on 4+ projects, share one store across them — keys are namespaced by repo slug so collisions are impossible. See [Sharing a store across projects](/shadow-canary/concepts/edge-config/#sharing-a-store-across-projects).
 
 **Propagation time:** Edge Config updates take up to 60 seconds to reach all warm middleware instances (the in-process cache TTL). Plan for this when doing manual overrides.
 

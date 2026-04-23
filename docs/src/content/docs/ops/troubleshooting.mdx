@@ -9,8 +9,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Local `next dev` logs `[shadow-canary] middleware passthrough (VERCEL_ENV != 'production')` on every request | `VERCEL_GIT_REPO_SLUG` not set locally | Run `vercel env pull` OR add `VERCEL_GIT_REPO_SLUG=<your-repo-slug>` to `.env.local`. Middleware degrades to passthrough in dev — behavior is correct but the warn is telling you the Edge Config key can't be derived |
+| Production deploy returns 500 on every request with `VERCEL_GIT_REPO_SLUG is not set` | The Vercel project isn't linked to a Git repo, OR the env var was explicitly overridden to empty | Re-link the Git repo in Vercel Project Settings > Git, then redeploy. `VERCEL_GIT_REPO_SLUG` is auto-injected on every linked-project deploy |
 | 404 on JS/CSS chunks after deploy | Skew Protection is OFF | Enable Skew Protection in Vercel Project Settings (Pro/Enterprise required) |
-| `/admin` shows "unconfigured" or fails to load Edge Config data | Edge Config store not linked to the project | Vercel dashboard > Storage > your store > Connected Projects — add your project |
+| `/admin` shows "unconfigured" or fails to load Edge Config data | Edge Config store not linked to the project, OR `shadow-<repo-slug>-canary` key not yet populated | Vercel dashboard > Storage > your store > Connected Projects — add your project. Run `deploy-shadow.yml` once to populate the key |
 | Cross-deploy rewrites return 401 | Deployment Protection is blocking shadow/previous deploy URLs | Disable SSO Protection or enable Protection Bypass for Automation (see [Prerequisites](/shadow-canary/install/prerequisites/)) |
 | Canary cron does not fire | Default branch is not `master` | Rename default branch to `master` (GitHub Settings > Branches) or update the `on.push.branches` trigger in the workflow files |
 | Canary stuck at 4% (or any low %) | `canaryPaused: true` in Edge Config | Use the admin UI Resume button, or set `canaryPaused: false` directly in Edge Config |

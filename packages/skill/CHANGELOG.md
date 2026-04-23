@@ -1,5 +1,14 @@
 # @dotworld/shadow-canary-skill
 
+## 0.3.0
+
+### Major Changes
+
+- Align with `@dotworld/shadow-canary-core@0.3.0` breaking change: the Edge Config key is now derived from the repo slug (`shadow-<slug>-canary`) and is not configurable.
+
+  - `doctor.md` check 8 now derives the expected key from the `origin` git remote instead of hardcoding `shadow-configuration`.
+  - `llms-install.md` (the install guide that `install.md` WebFetches) no longer asks for a configKey input, no longer writes `configKey` into `.shadow-canary.json`, and no longer guides setting `SHADOW_CANARY_KEY` as a GH secret / Vercel env var.
+
 ## 0.2.4
 
 ### Patch Changes

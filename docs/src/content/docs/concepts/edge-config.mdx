@@ -1,13 +1,17 @@
 ---
 title: Edge Config
-description: The shadow-configuration key schema — every field explained.
+description: The shadow-canary routing-state key — schema, derivation, and every field explained.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 Shadow-canary stores all routing state in a single Edge Config key. The middleware reads this key on every request (with a 60-second in-process cache). The three workflows write to it on every deploy or canary tick.
 
-By default the key is `shadow-configuration`. Starting with `@dotworld/shadow-canary-core@0.2.0` you can override it per project via the `SHADOW_CANARY_KEY` environment variable — useful when sharing one Edge Config store across several projects (see [Sharing a store](#sharing-a-store-across-projects) below).
+The key is derived deterministically from the repo slug as `shadow-<repo-slug>-canary` — for example, the repo `owner/my-app` uses the key `shadow-my-app-canary`. It is **not configurable**: the middleware reads `VERCEL_GIT_REPO_SLUG` (auto-injected by Vercel on every deploy) and the workflows read `github.event.repository.name` / `$GITHUB_REPOSITORY`. This removes by construction the silent-mismatch bug where one side writes to one key while the other reads a different one.
+
+<Aside type="tip">
+Since the key is namespaced by repo slug, several shadow-canary projects can safely share one Edge Config store without collisions — see [Sharing a store](#sharing-a-store-across-projects).
+</Aside>
 
 ## Full schema
 
@@ -140,62 +144,44 @@ You can edit the config directly in the Vercel dashboard (Storage > your store >
 
 ## Sharing a store across projects
 
-Vercel's Pro plan limits you to **3 Edge Config stores** per team. If you want to run shadow-canary on 4+ projects, you can host all their configs as separate keys inside one shared store.
+Vercel's Pro plan limits you to **3 Edge Config stores** per team. If you want to run shadow-canary on 4+ projects, host all their configs as separate keys inside one shared store — the per-repo namespacing of the key (`shadow-<repo-slug>-canary`) makes this safe by construction.
 
 ### Setup
 
 1. Link the same Edge Config store to every project (Vercel Storage → your store → Projects → Connect).
-2. In each project's **Vercel environment variables** (Production + Preview), set:
-
-   ```
-   SHADOW_CANARY_KEY=shadow-configuration-<project-name>
-   ```
-
-   Use a unique value per project — e.g. `shadow-configuration-stargaze`, `shadow-configuration-checkout`, etc. This is read by the middleware and admin API at runtime.
-3. In each project's **GitHub repo secrets** (Settings → Secrets and variables → Actions), set the exact same value:
-
-   ```
-   SHADOW_CANARY_KEY=shadow-configuration-<project-name>
-   ```
-
-   This is read by `deploy-shadow.yml`, `deploy-prod.yml`, and `canary-ramp.yml` when writing to Edge Config. **Forgetting this secret is the most common mistake when sharing a store** — the workflows fall back to the default `shadow-configuration` key and silently overwrite sibling projects' routing state on every deploy.
-4. In the Edge Config store, create one item per project, each with its own key:
+2. In the Edge Config store, create one item per project using its derived key:
 
    ```json
-   // Key: shadow-configuration-stargaze
+   // Repo: owner/stargaze → key: shadow-stargaze-canary
    { "trafficShadowPercent": 0, "trafficProdCanaryPercent": 100, "shadowForceIPs": [] }
 
-   // Key: shadow-configuration-checkout
+   // Repo: owner/checkout → key: shadow-checkout-canary
    { "trafficShadowPercent": 1, "trafficProdCanaryPercent": 100, "shadowForceIPs": [] }
    ```
 
-Runtime (middleware + admin API) reads the Vercel env var `SHADOW_CANARY_KEY`. Workflows read the GitHub Actions secret `SHADOW_CANARY_KEY`. Keep both values identical for a given project. No code changes in the host project.
-
-<Aside type="caution">
-Requires `@dotworld/shadow-canary-core` and `@dotworld/shadow-canary-templates` **≥ 0.2.1**. Versions 0.2.0 shipped the env var plumbing on the runtime side only — the workflows still hardcoded `shadow-configuration` and would overwrite neighbors.
-</Aside>
-
-### Programmatic override
-
-If you want to target a specific key from code (not env), pass `configKey` explicitly:
-
-```ts
-import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
-
-export async function middleware(req: NextRequest) {
-  return (await shadowCanaryMiddleware(req, {
-    configKey: 'shadow-configuration-stargaze',
-  })) ?? NextResponse.next();
-}
-```
+That's it — no per-project env var or GitHub secret to wire up. Middleware reads `VERCEL_GIT_REPO_SLUG` (auto-injected) and workflows read `github.event.repository.name` / `$GITHUB_REPOSITORY`. Both sides converge on the same derived key, so there is nothing to forget or desync.
 
 <Aside type="caution">
 Trade-offs: a single store with many keys centralizes all your routing state — a broken write or corrupt value affects every project on the same store. Keep stores dedicated when you can. Use the shared-store pattern deliberately, not by default.
 </Aside>
 
+### Renaming the repo
+
+The Edge Config key is derived from the repo slug, so if you rename the GitHub repo, the key changes and the old entry becomes orphaned. To migrate without a gap in routing state:
+
+1. Rename the repo on GitHub.
+2. Re-link the Vercel project to the renamed repo (Vercel Project Settings → Git). This updates `VERCEL_GIT_REPO_SLUG` on the next deploy.
+3. In the Edge Config store's Items tab, copy the value from `shadow-<old-slug>-canary` into a new item at `shadow-<new-slug>-canary`.
+4. Trigger a deploy (push to `master` or `production`). The workflows will write to the new key from then on.
+5. Delete the old `shadow-<old-slug>-canary` item once you've confirmed routing still works.
+
+Step 3 can be skipped: the next `deploy-shadow.yml` run repopulates `deploymentDomainShadow`, `trafficShadowPercent`, etc. from defaults — but any non-default values (like `shadowForceIPs` entries) will be lost.
+
 ### Limits inside one store
 
-Edge Config has a **64 KB total payload limit per store**. A typical ShadowConfig item is ~400 bytes, so a single shared store can host ~150 projects in theory. Keep the `shadowForceIPs` list compact and you'll stay well under the limit.
+Edge Config has a **64 KB total payload limit per store**. A typical ShadowConfig item is ~500 bytes, so a shared store can host **~100 projects safely** (up to ~120 in theory). The item size is dominated by `shadowForceIPs` — each IPv4 entry adds ~18 bytes. A large IP allowlist (20+ IPs) pushes an item over 1 KB and shrinks the per-store project ceiling fast.
+
+The runtime enforces an **8 KB per-item cap** in `patchShadowConfig` to prevent one project from pushing a shared store over the 64 KB limit and breaking every tenant.
 
 ---
 

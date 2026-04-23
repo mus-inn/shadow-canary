@@ -1,6 +1,5 @@
 export * from './types.js';
 export {
-  DEFAULT_CONFIG_KEY,
   resolveConfigKey,
   clearConfigCache,
 } from './edge-config/read.js';

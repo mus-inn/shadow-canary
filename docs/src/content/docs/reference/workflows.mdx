@@ -18,7 +18,7 @@ Shadow-canary ships three GitHub Actions workflows. Each workflow has a single, 
 1. Checkout the repository
 2. Install the Vercel CLI
 3. Run `vercel deploy --prod --skip-domain` — this deploys without aliasing to the custom domain
-4. Read the current `shadow-configuration` from Edge Config
+4. Read the current `shadow-<repo-slug>-canary` entry from Edge Config
 5. Merge the new shadow URL into the config (upsert), preserving all other fields
 
 ### Secrets required
@@ -36,7 +36,7 @@ Sets `deploymentDomainShadow` to the new deploy URL. Initializes `deploymentDoma
 
 ### Customization
 
-To change the shadow traffic percentage from 1%, edit `shadow-configuration` in the Edge Config directly — this workflow does not reset it. To permanently change the default, modify the `jq` merge expression in the workflow.
+To change the shadow traffic percentage from 1%, edit the `shadow-<repo-slug>-canary` entry in the Edge Config directly — this workflow does not reset it. To permanently change the default, modify the `jq` merge expression in the workflow.
 
 ---
 

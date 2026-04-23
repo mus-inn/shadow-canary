@@ -74,18 +74,22 @@ This guide adds shadow-canary to an existing Next.js 13.4+ App Router project. I
    # or copy from examples/greenfield/middleware.ts in the monorepo
    ```
 
-   **If you already have a middleware**, merge the shadow-canary logic using the higher-order wrapper from `@dotworld/shadow-canary-core`:
+   **If you already have a middleware**, compose `shadowCanaryMiddleware` at the top of your existing handler. It returns a `NextResponse` when routing is needed, or `null` when the request should pass through to your own logic:
 
    ```typescript
    import { NextRequest, NextResponse } from 'next/server';
    import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
 
-   async function myExistingMiddleware(req: NextRequest): Promise<NextResponse> {
-     // your existing logic
+   export async function middleware(req: NextRequest) {
+     // Run shadow/canary routing first. Returns a rewrite/cookie response when
+     // action is needed, or null when the request should fall through.
+     const canaryRes = await shadowCanaryMiddleware(req);
+     if (canaryRes) return canaryRes;
+
+     // ... your existing logic (auth, i18n, etc.) ...
+
      return NextResponse.next();
    }
-
-   export default shadowCanaryMiddleware(myExistingMiddleware);
 
    export const config = {
      matcher: [
@@ -94,7 +98,7 @@ This guide adds shadow-canary to an existing Next.js 13.4+ App Router project. I
    };
    ```
 
-   The `shadowCanaryMiddleware` wrapper runs shadow/canary routing first; if the request should bypass routing (already rewritten, not on the production deploy, bot UA), it falls through to your middleware. Otherwise it returns the routing response.
+   `shadowCanaryMiddleware` bails out (returns `null`) when the request should bypass routing — already-rewritten requests, non-production deploys, bot UAs, or when the Edge Config payload is missing. That's when control falls through to your existing logic.
 
    <Aside type="tip">
    The middleware matcher excludes `/admin` by design — the admin UI always runs on the current prod deploy, never rewritten to shadow or previous.
