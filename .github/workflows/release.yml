@@ -41,3 +41,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # setup-node@v4 with registry-url creates a project .npmrc containing
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` which is only
+          # resolved at command-run time — so NODE_AUTH_TOKEN must be set here,
+          # not just on setup-node. Without it, npm publish sees an empty token
+          # and fails with a misleading 404 (masked 401).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
