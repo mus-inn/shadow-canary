@@ -27,6 +27,7 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SHADOW_CANARY_KEY: ${{ secrets.SHADOW_CANARY_KEY || 'shadow-configuration' }}
       STEP: '4'
     steps:
       - name: Read current canary state from Edge Config
@@ -35,7 +36,7 @@ jobs:
           VALUE=$(curl -sf \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq '[.[] | select(.key == "shadow-configuration")] | .[0].value // {}')
+            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}')
 
           PROD_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProd // empty')
           PREV_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProdPrevious // empty')
@@ -127,7 +128,7 @@ jobs:
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+            -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"
 
       - name: Notify Slack — canary reached 100%
         if: >
@@ -152,7 +153,7 @@ jobs:
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+            -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"
 
       - name: Notify Slack — SLO failure (rolled back)
         if: >

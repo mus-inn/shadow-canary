@@ -11,7 +11,7 @@ Ask once, up front:
 3. **Vercel Edge Config Store ID** (format `ecfg_xxx`) — user must have one created in Vercel Storage tab and linked to the project. They can either:
    - Create a **dedicated store** for this project (recommended if store count < Vercel plan limit), OR
    - **Share an existing store** with other shadow-canary projects by using a project-specific Edge Config key (see input 4 below). Sharing is the standard workaround for Vercel Pro's 3-store limit.
-4. **Config key** (default: `shadow-configuration`) — the Edge Config key holding this project's ShadowConfig payload. Keep the default unless the store is shared with other shadow-canary projects — in that case, pick a unique key like `shadow-configuration-<project-name>`. This value maps to the `SHADOW_CANARY_KEY` env var.
+4. **Config key** (default: `shadow-configuration`) — the Edge Config key holding this project's ShadowConfig payload. Keep the default unless the store is shared with other shadow-canary projects — in that case, pick a unique key like `shadow-configuration-<project-name>`. This value must be set in **two places** with the same string: the `SHADOW_CANARY_KEY` Vercel env var (read by runtime) and the `SHADOW_CANARY_KEY` GitHub Actions secret (read by the deploy/ramp workflows). Forgetting the GitHub secret is the most common multi-tenant bug — the workflows will fall back to `shadow-configuration` and clobber sibling projects.
 5. **Admin username** for the /admin dashboard (default: `admin`)
 6. **Admin password** — ask if they want you to generate one (run `openssl rand -base64 24`) or provide their own
 7. **Slack webhook URL** (optional) — for canary notifications
@@ -212,6 +212,10 @@ Before shadow-canary is active, you must manually:
    - VERCEL_PROJECT_ID
    - VERCEL_EDGE_CONFIG_ID
    - SLACK_WEBHOOK_URL (optional)
+   - SHADOW_CANARY_KEY (REQUIRED when sharing an Edge Config store across projects —
+     set to the exact same value as the Vercel env var, e.g. `shadow-configuration-<project>`.
+     Without it, the workflows write to the default `shadow-configuration` key and will
+     clobber sibling projects using the same store.)
 
 6. Branch model:
    - Rename current default branch to `production`

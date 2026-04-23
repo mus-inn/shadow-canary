@@ -145,14 +145,21 @@ Vercel's Pro plan limits you to **3 Edge Config stores** per team. If you want t
 ### Setup
 
 1. Link the same Edge Config store to every project (Vercel Storage → your store → Projects → Connect).
-2. In each project's environment variables, set:
+2. In each project's **Vercel environment variables** (Production + Preview), set:
 
    ```
    SHADOW_CANARY_KEY=shadow-configuration-<project-name>
    ```
 
-   Use a unique value per project — e.g. `shadow-configuration-stargaze`, `shadow-configuration-checkout`, etc.
-3. In the Edge Config store, create one item per project, each with its own key:
+   Use a unique value per project — e.g. `shadow-configuration-stargaze`, `shadow-configuration-checkout`, etc. This is read by the middleware and admin API at runtime.
+3. In each project's **GitHub repo secrets** (Settings → Secrets and variables → Actions), set the exact same value:
+
+   ```
+   SHADOW_CANARY_KEY=shadow-configuration-<project-name>
+   ```
+
+   This is read by `deploy-shadow.yml`, `deploy-prod.yml`, and `canary-ramp.yml` when writing to Edge Config. **Forgetting this secret is the most common mistake when sharing a store** — the workflows fall back to the default `shadow-configuration` key and silently overwrite sibling projects' routing state on every deploy.
+4. In the Edge Config store, create one item per project, each with its own key:
 
    ```json
    // Key: shadow-configuration-stargaze
@@ -162,7 +169,11 @@ Vercel's Pro plan limits you to **3 Edge Config stores** per team. If you want t
    { "trafficShadowPercent": 1, "trafficProdCanaryPercent": 100, "shadowForceIPs": [] }
    ```
 
-The middleware, admin API, and canary-ramp workflow all honor `SHADOW_CANARY_KEY` automatically. No code changes in the host project.
+Runtime (middleware + admin API) reads the Vercel env var `SHADOW_CANARY_KEY`. Workflows read the GitHub Actions secret `SHADOW_CANARY_KEY`. Keep both values identical for a given project. No code changes in the host project.
+
+<Aside type="caution">
+Requires `@dotworld/shadow-canary-core` and `@dotworld/shadow-canary-templates` **≥ 0.2.1**. Versions 0.2.0 shipped the env var plumbing on the runtime side only — the workflows still hardcoded `shadow-configuration` and would overwrite neighbors.
+</Aside>
 
 ### Programmatic override
 

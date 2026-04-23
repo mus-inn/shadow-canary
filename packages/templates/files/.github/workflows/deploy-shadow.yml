@@ -13,6 +13,7 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
+      SHADOW_CANARY_KEY: ${{ secrets.SHADOW_CANARY_KEY || 'shadow-configuration' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,12 +35,12 @@ jobs:
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "New shadow deploy: $DEPLOY_URL"
 
-      - name: Merge new shadow URL into shadow-configuration
+      - name: Merge new shadow URL into shadow config (honors SHADOW_CANARY_KEY)
         run: |
           CURRENT=$(curl -sf \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq '[.[] | select(.key == "shadow-configuration")] | .[0].value // {}' \
+            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}' \
             || echo '{}')
           if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
 
@@ -57,4 +58,4 @@ jobs:
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --argjson v "$MERGED" '{items:[{operation:"upsert",key:"shadow-configuration",value:$v}]}')"
+            -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"
