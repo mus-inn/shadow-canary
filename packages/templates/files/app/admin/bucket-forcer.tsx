@@ -136,14 +136,6 @@ export function BucketForcer() {
         >
           Ouvrir la home ↗
         </a>
-        <a
-          href="/debug"
-          target="_blank"
-          rel="noopener"
-          className="adm-btn adm-btn--small adm-btn--ghost"
-        >
-          Page debug ↗
-        </a>
         <span className="adm-bucket-footer-spacer" />
         {flash && (
           <span className="adm-bucket-flash" role="status">
