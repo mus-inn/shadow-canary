@@ -1,5 +1,11 @@
 # @dotworld/shadow-canary-skill
 
+## 0.5.1
+
+### Patch Changes
+
+- Version-aligned with `@dotworld/shadow-canary-templates@0.5.1` (legend clarity fix). No skill content changes.
+
 ## 0.5.0
 
 ### Minor Changes

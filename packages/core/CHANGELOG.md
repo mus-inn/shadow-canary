@@ -1,5 +1,11 @@
 # @dotworld/shadow-canary-core
 
+## 0.5.1
+
+### Patch Changes
+
+- No public API changes. Templates 0.5.1 ships a traffic-bar legend fix — the numbers shown on each bucket are now the canary knobs (9% / 91% of prod, 1% of total) instead of the effective traffic share (8.9% / 90.1% / 1.0%), matching the SLO log and the `Canary en progression X%` header. Bar widths remain proportional to the actual share. See templates changelog.
+
 ## 0.5.0
 
 ### Minor Changes

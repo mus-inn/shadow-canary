@@ -292,7 +292,9 @@ export function AdminDashboard({ initial }: Props) {
               segments={[
                 {
                   label: 'shadow (master)',
-                  value: shadowPct,
+                  widthValue: shadowPct,
+                  displayPct: shadowPct,
+                  displayUnit: 'du total',
                   color: '#f97316',
                   host: shortHost(shadowHost),
                   active: true,
@@ -302,18 +304,33 @@ export function AdminDashboard({ initial }: Props) {
                   ? [
                       {
                         label: 'previous prod',
-                        value: prevShare,
+                        widthValue: prevShare,
+                        displayPct: 100 - canaryPct,
+                        displayUnit: 'du prod',
+                        // Only surface the "actual traffic share" line when
+                        // shadow is consuming enough to push the numbers
+                        // apart (≥ 0.5 pt difference). Keeps the legend
+                        // clean when shadow is 0.
+                        effectiveHint:
+                          Math.abs(prevShare - (100 - canaryPct)) >= 0.5
+                            ? `${prevShare.toFixed(1)}% du trafic total`
+                            : undefined,
                         color: '#6366f1',
                         host: shortHost(prevHost),
                         active: canaryLive,
                         info: bucketInfo?.prodPrevious,
-                        valueHint: `${(100 - canaryPct).toFixed(0)}% du prod`,
                       },
                     ]
                   : []),
                 {
                   label: 'new prod',
-                  value: newShare,
+                  widthValue: newShare,
+                  displayPct: canaryPct,
+                  displayUnit: 'du prod',
+                  effectiveHint:
+                    Math.abs(newShare - canaryPct) >= 0.5
+                      ? `${newShare.toFixed(1)}% du trafic total`
+                      : undefined,
                   color: '#22c55e',
                   host: shortHost(prodHost),
                   active:
@@ -321,7 +338,6 @@ export function AdminDashboard({ initial }: Props) {
                     status === 'complete-sticky' ||
                     status === 'stable',
                   info: bucketInfo?.prodNew,
-                  valueHint: `${canaryPct}% du prod`,
                 },
               ]}
             />
@@ -740,19 +756,32 @@ function TimingLine({
 
 type Segment = {
   label: string;
-  value: number;
+  // Width of this segment in the bar (its actual share of total traffic).
+  // Summed across segments = 100%.
+  widthValue: number;
+  // Primary legend number: shows the *canary knob* integer the user
+  // controls (shadowPct directly, or canaryPct vs 100-canaryPct for prod
+  // buckets) — matches the SLO log and the "Canary en progression X%"
+  // header. These don't sum to 100 across all segments because shadow is
+  // a pre-filter and canary is a sub-split, but each one matches the knob
+  // the user thinks about.
+  displayPct: number;
+  // Short suffix clarifying the denominator of displayPct, e.g. "du prod"
+  // for new/previous, or "du total" for shadow. Avoids the ambiguity of
+  // which % we're showing.
+  displayUnit: string;
+  // Tiny secondary line showing the actual traffic share (widthValue) when
+  // it differs from displayPct — useful when the ~1% shadow offset makes
+  // them disagree (e.g. canary knob 9% → effective 8.9% of total).
+  effectiveHint?: string;
   color: string;
   host: string;
   active: boolean;
   info?: BucketInfo;
-  // Optional secondary number shown after the main %. Example: "8% du prod"
-  // on the new-prod bucket so the operator can map the traffic share (7.9%
-  // of total) back to the canary knob (8% of prod).
-  valueHint?: string;
 };
 
 function TrafficBar({ segments }: { segments: Segment[] }) {
-  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const total = segments.reduce((s, x) => s + x.widthValue, 0) || 1;
   return (
     <div>
       <div className="adm-bar" role="img" aria-label="Répartition du trafic">
@@ -762,11 +791,11 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
             className={`adm-bar-seg${s.active ? ' adm-bar-seg--active' : ''}`}
             style={
               {
-                width: `${(s.value / total) * 100}%`,
+                width: `${(s.widthValue / total) * 100}%`,
                 ['--adm-seg-color' as string]: s.color,
               } as React.CSSProperties
             }
-            title={`${s.label} — ${s.value.toFixed(1)}% (${s.host})`}
+            title={`${s.label} — ${s.displayPct}% ${s.displayUnit} (${s.widthValue.toFixed(1)}% du trafic, ${s.host})`}
           />
         ))}
       </div>
@@ -801,9 +830,15 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
               )}
             </span>
             <span className="adm-legend-value">
-              {s.value.toFixed(1)}%
-              {s.valueHint && (
-                <span className="adm-legend-value-hint">{s.valueHint}</span>
+              <span>
+                {s.displayPct}%
+                <span className="adm-legend-value-unit">
+                  {' '}
+                  {s.displayUnit}
+                </span>
+              </span>
+              {s.effectiveHint && (
+                <span className="adm-legend-value-hint">{s.effectiveHint}</span>
               )}
             </span>
           </li>

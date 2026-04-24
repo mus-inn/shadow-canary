@@ -1,5 +1,13 @@
 # @dotworld/shadow-canary-templates
 
+## 0.5.1
+
+### Patch Changes
+
+- **Admin traffic-bar legend clarity**. Was showing the effective traffic share (e.g. `new prod 8.9%`) which looked off when paired with the SLO log saying `5% → 9%` and the header `Canary en progression 9%` — the 0.1pt gap comes from shadow eating 1% of total traffic before the prod split, and operators mistook it for a workflow bug.
+
+  Legend now displays the **canary knob values directly** (the integers the workflow and manual controls actually mutate): `new prod 9% du prod`, `previous prod 91% du prod`, `shadow 1% du total`. Bar widths stay proportional to the actual traffic share. A small secondary line `(8.9% du trafic total)` appears under the prod buckets when shadow ≥ 0.5%, so the effective share is still one glance away.
+
 ## 0.5.0
 
 ### Minor Changes

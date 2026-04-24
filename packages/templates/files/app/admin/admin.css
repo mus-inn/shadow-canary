@@ -541,6 +541,12 @@
   opacity: 0.5;
 }
 
+.adm-legend-value-unit {
+  font-size: 0.72rem;
+  font-weight: 400;
+  opacity: 0.55;
+}
+
 /* ---------- SLO log ---------- */
 
 .adm-slo-list {
