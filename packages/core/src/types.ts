@@ -14,6 +14,20 @@ export type ShadowConfig = {
   canaryPaused?: boolean;
   canaryStartedAt?: string; // ISO timestamp, set when canary goes active
   shadowForceIPs?: string[];
+  // Ring buffer of the last 10 SLO check results written by canary-ramp.yml.
+  // Most recent first. Used by the admin UI to surface why the canary isn't
+  // advancing (failing checks vs. passing but gated, etc.) without having to
+  // dig into GitHub Actions logs.
+  sloChecks?: SloCheck[];
+};
+
+export type SloCheck = {
+  ts: string; // ISO timestamp of when the check finished
+  ok: boolean; // true iff both HTTP probes returned 200
+  codes: number[]; // HTTP status codes for each of the 2 probes (0 = unreachable)
+  bodyExcerpt: string; // first ~80 chars of the last probe's response body
+  pctBefore: number; // trafficProdCanaryPercent at the start of the tick
+  pctAfter: number; // value written to Edge Config after this check (0 on rollback)
 };
 
 export type Deployment = {

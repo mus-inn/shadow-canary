@@ -28,6 +28,7 @@ jobs:
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       # GitHub injects GITHUB_REPOSITORY ("owner/repo") into every step by
@@ -100,13 +101,26 @@ jobs:
           case "$URL" in http*) ;; *) URL="https://$URL" ;; esac
 
           OK=0
+          LAST_BODY=""
           for i in 1 2; do
             CODE=$(curl -s -o /tmp/slo_body.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
             BODY=$(cat /tmp/slo_body.txt 2>/dev/null || true)
-            echo "SLO check $i → HTTP $CODE :: $BODY"
+            # Trim to 80 chars, strip newlines/CR for YAML-safe single-line output
+            BODY_TRIMMED="$(echo "${BODY:0:80}" | tr '\n\r' '  ')"
+            echo "SLO check $i → HTTP $CODE :: $BODY_TRIMMED"
             if [ "$CODE" = "200" ]; then OK=$((OK + 1)); fi
+            echo "code$i=$CODE" >> "$GITHUB_OUTPUT"
+            LAST_BODY="$BODY_TRIMMED"
             if [ "$i" = "1" ]; then sleep 30; fi
           done
+
+          # Use the multiline-safe <<EOF form so any remaining oddball chars in
+          # the body don't break $GITHUB_OUTPUT parsing.
+          {
+            echo "body_excerpt<<EOF_BODY"
+            echo "$LAST_BODY"
+            echo "EOF_BODY"
+          } >> "$GITHUB_OUTPUT"
 
           if [ "$OK" = "2" ]; then
             echo "ok=1" >> "$GITHUB_OUTPUT"
@@ -184,3 +198,43 @@ jobs:
           curl -sS -X POST -H 'Content-Type: application/json' \
             -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
             "$SLACK_WEBHOOK_URL"
+
+      - name: Record SLO check in Edge Config (ring buffer, last 10)
+        # Runs on both pass and fail paths (not on skip) so the admin UI has a
+        # trail of recent checks to diagnose "why isn't the canary moving?".
+        if: steps.gate.outputs.skip == '0'
+        run: |
+          OK='${{ steps.slo.outputs.ok }}'
+          PCT_BEFORE='${{ steps.state.outputs.pct }}'
+          if [ "$OK" = "1" ]; then
+            PCT_AFTER='${{ steps.compute.outputs.next }}'
+          else
+            PCT_AFTER="0"
+          fi
+          OK_BOOL=$( [ "$OK" = "1" ] && echo true || echo false )
+
+          # Re-read the current Edge Config value because the bump/rollback
+          # step just mutated it — we want to merge sloChecks on top of the
+          # fresh post-bump state, not overwrite the pct the previous step set.
+          FRESH=$(curl -sf \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}')
+
+          ENTRY=$(jq -n \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson ok "$OK_BOOL" \
+            --argjson code1 "${{ steps.slo.outputs.code1 }}" \
+            --argjson code2 "${{ steps.slo.outputs.code2 }}" \
+            --arg body "${{ steps.slo.outputs.body_excerpt }}" \
+            --argjson pctBefore "$PCT_BEFORE" \
+            --argjson pctAfter "$PCT_AFTER" \
+            '{ts: $ts, ok: $ok, codes: [$code1, $code2], bodyExcerpt: $body, pctBefore: $pctBefore, pctAfter: $pctAfter}')
+
+          MERGED=$(echo "$FRESH" | jq --argjson entry "$ENTRY" '. + {sloChecks: (([$entry] + (.sloChecks // [])) | .[0:10])}')
+
+          curl -sS -X PATCH \
+            "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"

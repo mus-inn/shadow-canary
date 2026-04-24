@@ -355,6 +355,9 @@ export function AdminDashboard({ initial }: Props) {
           </div>
         </section>
 
+        {/* ---------- SLO check log ---------- */}
+        <SloLog checks={config?.sloChecks ?? []} now={now} />
+
         {/* ---------- Bucket forcer (dev test aid) ---------- */}
         <BucketForcer />
 
@@ -658,6 +661,86 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+function SloLog({
+  checks,
+  now,
+}: {
+  checks: NonNullable<ShadowConfig['sloChecks']>;
+  now: number;
+}) {
+  return (
+    <section className="adm-card">
+      <div className="adm-card-header">
+        <h2 className="adm-card-title">Historique SLO (canary ramp)</h2>
+        <span
+          style={{
+            fontSize: '0.72rem',
+            opacity: 0.4,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {checks.length} / 10
+        </span>
+      </div>
+      <p className="adm-card-hint">
+        Les derniers checks exécutés par <code>canary-ramp.yml</code> (toutes
+        les 15 min quand un canary est en cours). Pratique pour comprendre
+        pourquoi le canary n&apos;avance pas : si la liste est vide, la cron
+        ne tourne pas ; si elle est pleine de{' '}
+        <span className="adm-slo-ok-inline">✓</span>, le ramp avance ; des{' '}
+        <span className="adm-slo-ko-inline">✗</span> indiquent un SLO qui a
+        rollback.
+      </p>
+      {checks.length === 0 ? (
+        <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
+          Aucun check SLO enregistré — vérifier que le workflow{' '}
+          <code>canary-ramp.yml</code> existe et tourne sur la default branch.
+        </p>
+      ) : (
+        <ul className="adm-slo-list" role="list">
+          {checks.map((c, i) => {
+            const ts = new Date(c.ts).getTime();
+            const ago = prettyTimeAgo(ts);
+            const fullTs = new Date(c.ts).toLocaleString('fr-FR');
+            const codes = c.codes.map((x) => x || '—').join(' / ');
+            const isRollback = !c.ok && c.pctAfter === 0;
+            return (
+              <li
+                key={`${c.ts}-${i}`}
+                className={`adm-slo-row ${c.ok ? 'adm-slo-row--ok' : 'adm-slo-row--ko'}`}
+              >
+                <span className="adm-slo-icon" aria-hidden="true">
+                  {c.ok ? '✓' : '✗'}
+                </span>
+                <span className="adm-slo-time" title={fullTs}>
+                  {ago}
+                </span>
+                <code className="adm-slo-codes">{codes}</code>
+                <span className="adm-slo-pct">
+                  {c.pctBefore}% →{' '}
+                  <strong>{c.pctAfter}%</strong>
+                  {isRollback && (
+                    <span className="adm-slo-badge">rollback</span>
+                  )}
+                </span>
+                {c.bodyExcerpt && (
+                  <code
+                    className="adm-slo-body"
+                    title={c.bodyExcerpt}
+                  >
+                    {c.bodyExcerpt}
+                  </code>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

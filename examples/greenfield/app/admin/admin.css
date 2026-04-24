@@ -526,6 +526,106 @@
   padding-top: 2px;
 }
 
+/* ---------- SLO log ---------- */
+
+.adm-slo-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.adm-slo-row {
+  display: grid;
+  grid-template-columns: 16px auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid transparent;
+}
+
+.adm-slo-row--ok {
+  border-left-color: #22c55e;
+}
+
+.adm-slo-row--ko {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.adm-slo-icon {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.adm-slo-row--ok .adm-slo-icon {
+  color: #22c55e;
+}
+
+.adm-slo-row--ko .adm-slo-icon {
+  color: #ef4444;
+}
+
+.adm-slo-time {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  min-width: 66px;
+}
+
+.adm-slo-codes {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  opacity: 0.65;
+}
+
+.adm-slo-pct {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.adm-slo-badge {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.adm-slo-body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  opacity: 0.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  grid-column: 1 / -1;
+  padding-left: 26px;
+  padding-top: 2px;
+}
+
+.adm-slo-ok-inline {
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.adm-slo-ko-inline {
+  color: #ef4444;
+  font-weight: 700;
+}
+
 /* ---------- Actions ---------- */
 
 .adm-actions {
