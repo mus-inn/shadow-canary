@@ -1,5 +1,17 @@
 # @dotworld/shadow-canary-core
 
+## 0.4.0
+
+### Minor Changes
+
+- **Admin UX improvements** — no breaking changes to the public API.
+
+  - New `getDeploymentByUrl(url)` helper exported from core. Looks up a single Vercel deployment by its per-deploy URL (the one stored in `ShadowConfig`) and returns the full `Deployment` object (state, `meta.githubCommitSha`, `meta.githubCommitRef`, `meta.githubCommitMessage`). Powers the new `/api/admin/bucket-info` endpoint that shows commit / branch / message under each bucket in the admin dashboard.
+  - `ShadowConfig` gains two optional fields:
+    - `deploymentDomainShadowPrevious?: string` — saved by `deploy-shadow.yml` before overwriting `deploymentDomainShadow` on every push to `master`. Enables the new shadow rollback flow (swap current ↔ previous, no Vercel promote needed since shadow is addressed by URL, not custom domain).
+    - `sloChecks?: SloCheck[]` — ring buffer of the last 10 SLO check results written by `canary-ramp.yml`. Each entry has `{ts, ok, codes, bodyExcerpt, pctBefore, pctAfter}`. Surfaces in the admin UI why the canary is/isn't advancing without digging into GH Actions logs.
+  - New exported type `SloCheck` for the ring buffer entries.
+
 ## 0.3.0
 
 ### Major Changes

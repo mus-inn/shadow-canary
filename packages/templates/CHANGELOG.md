@@ -1,5 +1,18 @@
 # @dotworld/shadow-canary-templates
 
+## 0.4.0
+
+### Minor Changes
+
+- **Admin dashboard improvements** — four features added, no breaking changes for host projects that re-copy the template.
+
+  - **Bug fix**: the dead `/debug` link is removed from the Bucket forcer section (the page was optional and often renamed during install).
+  - **Version/branch per bucket**: the Traffic bar legend now displays the branch name and short commit SHA under each bucket URL (shadow, prod-new, prod-previous). Requires the new `/api/admin/bucket-info` endpoint (included).
+  - **SLO check log**: `canary-ramp.yml` now appends each SLO check result into a ring buffer in Edge Config (`sloChecks`, last 10). The admin UI renders a timeline with pass/fail icon, timestamp, HTTP codes, pct transition and body excerpt. Empty list = cron isn't running; ✗ = SLO failed → rollback; body excerpt shows the response that triggered it.
+  - **Shadow rollback**: `deploy-shadow.yml` now saves the current shadow URL into `deploymentDomainShadowPrevious` before overwriting on each push. The Shadow traffic card gets a "Rollback shadow" button that swaps the two URLs (symmetric — click again to toggle back). New endpoint `/api/admin/rollback-shadow`.
+
+  Pair with `@dotworld/shadow-canary-core@0.4.0`. Re-copy the workflow files and admin UI: `npx @dotworld/shadow-canary-templates@latest copy . --force`.
+
 ## 0.3.0
 
 ### Major Changes

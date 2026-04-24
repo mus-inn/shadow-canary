@@ -1,5 +1,11 @@
 # @dotworld/shadow-canary-skill
 
+## 0.4.0
+
+### Minor Changes
+
+- Version-aligned with `@dotworld/shadow-canary-core@0.4.0` (admin UX additions). No skill content changes in this release — the new admin features are in the templates package.
+
 ## 0.3.0
 
 ### Major Changes

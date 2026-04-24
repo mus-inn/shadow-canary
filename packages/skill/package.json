@@ -1,6 +1,6 @@
 {
   "name": "@dotworld/shadow-canary-skill",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Claude Code skill for operating the shadow-canary deployment pattern",
   "repository": {
     "type": "git",
