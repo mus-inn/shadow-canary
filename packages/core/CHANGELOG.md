@@ -1,5 +1,15 @@
 # @dotworld/shadow-canary-core
 
+## 0.5.0
+
+### Minor Changes
+
+- **Shadow deploy history (20 deep)**. `ShadowConfig` gains `shadowHistory?: string[]` — a ring buffer of the last 20 outgoing shadow deploy URLs, most recent first. Populated by `deploy-shadow.yml` on every push to `master` (dedupes + trims). Commit metadata is fetched on-demand from the Vercel API (see `getDeploymentByUrl`) so history stays compact in Edge Config (~1.5 KB for 20 entries).
+
+  `deploymentDomainShadowPrevious` is now **deprecated** but still populated with `shadowHistory[0]` for back-compat with v0.4.x admin UIs. Will be removed in v0.6.
+
+- **Configurable manual step**: no API change in core, but the `/api/admin/canary/step-forward` and `/api/admin/canary/step-back` endpoints now accept `{step?: number}` in the body (default 4, range 1–50). Admin UI adds an input for it.
+
 ## 0.4.1
 
 ### Patch Changes

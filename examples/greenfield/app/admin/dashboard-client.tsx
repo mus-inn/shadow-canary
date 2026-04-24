@@ -29,6 +29,15 @@ type BucketInfoMap = {
   prodPrevious: BucketInfo;
 };
 
+type ShadowHistoryEntry = {
+  url: string;
+  sha: string | null;
+  ref: string | null;
+  message: string | null;
+  createdAt: number | null;
+  state: string | null;
+};
+
 type Status =
   | 'stable'
   | 'starting'
@@ -42,7 +51,7 @@ type ModalState =
   | { kind: 'cancel' }
   | { kind: 'promote' }
   | { kind: 'rollback'; deploy: Deployment }
-  | { kind: 'rollback-shadow' };
+  | { kind: 'rollback-shadow'; target: ShadowHistoryEntry };
 
 function deriveStatus(cfg: ShadowConfig | null): Status {
   if (!cfg) return 'unknown';
@@ -65,6 +74,12 @@ function statusToPhase(s: Status): 0 | 1 | 2 | 3 | 4 {
 function shortHost(url?: string): string {
   if (!url) return '—';
   return url.replace(/^https?:\/\//, '').split('.')[0];
+}
+
+function stepSize(draft: string): number | null {
+  const n = Number(draft);
+  if (!Number.isFinite(n) || n < 1 || n > 50) return null;
+  return Math.round(n);
 }
 
 function prettyTimeAgo(ms: number): string {
@@ -112,19 +127,22 @@ export function AdminDashboard({ initial }: Props) {
   const [config, setConfig] = useState(initial.config);
   const [deployments, setDeployments] = useState(initial.deployments);
   const [bucketInfo, setBucketInfo] = useState<BucketInfoMap | null>(null);
+  const [shadowHistory, setShadowHistory] = useState<ShadowHistoryEntry[]>([]);
   const [error, setError] = useState(initial.error);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
+  const [stepInput, setStepInput] = useState<string>('4');
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [stateRes, deployRes, bucketRes] = await Promise.all([
+      const [stateRes, deployRes, bucketRes, historyRes] = await Promise.all([
         fetch('/api/admin/state', { cache: 'no-store' }),
         fetch('/api/admin/deployments', { cache: 'no-store' }),
         fetch('/api/admin/bucket-info', { cache: 'no-store' }),
+        fetch('/api/admin/shadow-history', { cache: 'no-store' }),
       ]);
       if (stateRes.ok) {
         const { config: c } = await stateRes.json();
@@ -136,6 +154,12 @@ export function AdminDashboard({ initial }: Props) {
       }
       if (bucketRes.ok) {
         setBucketInfo((await bucketRes.json()) as BucketInfoMap);
+      }
+      if (historyRes.ok) {
+        const { entries } = (await historyRes.json()) as {
+          entries: ShadowHistoryEntry[];
+        };
+        setShadowHistory(entries ?? []);
       }
       setError(null);
     } catch (e) {
@@ -340,25 +364,52 @@ export function AdminDashboard({ initial }: Props) {
 
           <div className="adm-actions adm-actions--secondary">
             <span className="adm-actions-label">Manuel</span>
+            <span className="adm-step-input-wrap">
+              <input
+                type="number"
+                min={1}
+                max={50}
+                step={1}
+                value={stepInput}
+                onChange={(e) => setStepInput(e.target.value)}
+                aria-label="Taille du pas (en points de %)"
+                className="adm-input adm-step-input"
+                disabled={isBusy}
+              />
+            </span>
             <ActionBtn
               id="step-back"
               pendingId={pendingAction}
-              disabled={isBusy || canaryPct <= 0 || !prevHost}
+              disabled={
+                isBusy ||
+                canaryPct <= 0 ||
+                !prevHost ||
+                !stepSize(stepInput)
+              }
               onClick={() =>
-                void run('step-back', '/api/admin/canary/step-back')
+                void run('step-back', '/api/admin/canary/step-back', {
+                  step: stepSize(stepInput) ?? 4,
+                })
               }
             >
-              − 4% (step back)
+              − {stepSize(stepInput) ?? 4}% (step back)
             </ActionBtn>
             <ActionBtn
               id="step-forward"
               pendingId={pendingAction}
-              disabled={isBusy || canaryPct >= 100 || !prevHost}
+              disabled={
+                isBusy ||
+                canaryPct >= 100 ||
+                !prevHost ||
+                !stepSize(stepInput)
+              }
               onClick={() =>
-                void run('step-forward', '/api/admin/canary/step-forward')
+                void run('step-forward', '/api/admin/canary/step-forward', {
+                  step: stepSize(stepInput) ?? 4,
+                })
               }
             >
-              + 4% (step forward)
+              + {stepSize(stepInput) ?? 4}% (step forward)
             </ActionBtn>
             <ActionBtn
               id="promote"
@@ -381,15 +432,22 @@ export function AdminDashboard({ initial }: Props) {
         {/* ---------- Shadow percent ---------- */}
         <ShadowPercentCard
           current={shadowPct}
-          previousShadowUrl={config?.deploymentDomainShadowPrevious}
-          currentShadowUrl={config?.deploymentDomainShadow}
           pending={pendingAction === 'shadow-percent'}
-          pendingRollback={pendingAction === 'rollback-shadow'}
           disabled={isBusy}
           onSave={(value) =>
             void run('shadow-percent', '/api/admin/shadow-percent', { value })
           }
-          onRollback={() => setModal({ kind: 'rollback-shadow' })}
+        />
+
+        {/* ---------- Shadow history ---------- */}
+        <ShadowHistorySection
+          entries={shadowHistory}
+          currentShadowUrl={config?.deploymentDomainShadow}
+          pendingAction={pendingAction}
+          disabled={isBusy}
+          onRollback={(entry) =>
+            setModal({ kind: 'rollback-shadow', target: entry })
+          }
         />
 
         {/* ---------- Phases diagram ---------- */}
@@ -539,32 +597,51 @@ export function AdminDashboard({ initial }: Props) {
       <ConfirmModal
         open={modal?.kind === 'rollback-shadow'}
         tone="warn"
-        title="Rollback shadow au deploy précédent ?"
+        title="Rollback shadow vers ce deploy ?"
         body={
-          <>
-            <p style={{ margin: '0 0 10px' }}>
-              Swap <code>deploymentDomainShadow</code> et{' '}
-              <code>deploymentDomainShadowPrevious</code>. Le shadow actuel (
-              <code>{shortHost(config?.deploymentDomainShadow)}</code>) passe
-              en &quot;previous&quot;, le précédent (
-              <code>{shortHost(config?.deploymentDomainShadowPrevious)}</code>)
-              reprend les {shadowPct}% de trafic shadow.
-            </p>
-            <p style={{ margin: 0 }}>
-              Pas de re-alias de domaine (contrairement au rollback prod) —
-              le shadow est adressé directement par URL dans le middleware.
-              Action instantanée et réversible (le swap est symétrique, tu
-              peux cliquer à nouveau pour revenir).
-            </p>
-          </>
+          modal?.kind === 'rollback-shadow' ? (
+            <>
+              <p style={{ margin: '0 0 10px' }}>
+                Passe <code>deploymentDomainShadow</code> sur{' '}
+                <code>{shortHost(modal.target.url)}</code>
+                {modal.target.sha && (
+                  <>
+                    {' '}
+                    (<code>{modal.target.sha.slice(0, 7)}</code>)
+                  </>
+                )}
+                . L&apos;ancien shadow (
+                <code>{shortHost(config?.deploymentDomainShadow)}</code>)
+                remonte en tête d&apos;historique, donc tu pourras y revenir
+                si besoin.
+              </p>
+              <p style={{ margin: 0 }}>
+                Pas de re-alias de domaine (contrairement au rollback prod) —
+                le shadow est adressé directement par URL dans le middleware.
+                Propagation en ≤ 60s (TTL cache Edge Config).
+              </p>
+            </>
+          ) : null
         }
-        confirmPhrase="rollback-shadow"
+        confirmPhrase={
+          modal?.kind === 'rollback-shadow'
+            ? (modal.target.sha?.slice(0, 7) ?? 'rollback-shadow')
+            : undefined
+        }
         confirmLabel="Rollback shadow"
-        pending={pendingAction === 'rollback-shadow'}
-        onClose={() => setModal(null)}
-        onConfirm={() =>
-          void run('rollback-shadow', '/api/admin/rollback-shadow')
+        pending={
+          modal?.kind === 'rollback-shadow' &&
+          pendingAction === `rollback-shadow-${modal.target.url}`
         }
+        onClose={() => setModal(null)}
+        onConfirm={() => {
+          if (modal?.kind !== 'rollback-shadow') return;
+          void run(
+            `rollback-shadow-${modal.target.url}`,
+            '/api/admin/rollback-shadow',
+            { targetUrl: modal.target.url },
+          );
+        }}
       />
     </>
   );
@@ -900,22 +977,14 @@ function ActionBtn({
 
 function ShadowPercentCard({
   current,
-  previousShadowUrl,
-  currentShadowUrl,
   pending,
-  pendingRollback,
   disabled,
   onSave,
-  onRollback,
 }: {
   current: number;
-  previousShadowUrl?: string;
-  currentShadowUrl?: string;
   pending: boolean;
-  pendingRollback: boolean;
   disabled: boolean;
   onSave: (value: number) => void;
-  onRollback: () => void;
 }) {
   const [draft, setDraft] = useState<string>(String(current));
 
@@ -969,41 +1038,126 @@ function ShadowPercentCard({
           </span>
         )}
       </div>
-
-      <div className="adm-shadow-rollback">
-        <span className="adm-shadow-rollback-label">
-          Rollback shadow au deploy précédent
-        </span>
-        <span className="adm-shadow-rollback-urls">
-          {currentShadowUrl ? (
-            <>
-              actuel <code>{shortHost(currentShadowUrl)}</code>
-            </>
-          ) : (
-            <em style={{ opacity: 0.5 }}>aucun shadow actuel</em>
-          )}
-          {previousShadowUrl && (
-            <>
-              {' '}
-              · précédent <code>{shortHost(previousShadowUrl)}</code>
-            </>
-          )}
-        </span>
-        <button
-          type="button"
-          className={`adm-btn adm-btn--small${pendingRollback ? ' adm-btn--pending' : ''}`}
-          onClick={onRollback}
-          disabled={disabled || !previousShadowUrl}
-          title={
-            previousShadowUrl
-              ? `Swap shadow ↔ previous`
-              : 'Aucun deploy shadow précédent enregistré — le premier swap sera possible après le prochain push master.'
-          }
-        >
-          Rollback shadow
-        </button>
-      </div>
     </section>
+  );
+}
+
+function ShadowHistorySection({
+  entries,
+  currentShadowUrl,
+  pendingAction,
+  disabled,
+  onRollback,
+}: {
+  entries: ShadowHistoryEntry[];
+  currentShadowUrl?: string;
+  pendingAction: string | null;
+  disabled: boolean;
+  onRollback: (entry: ShadowHistoryEntry) => void;
+}) {
+  return (
+    <section className="adm-card">
+      <div className="adm-card-header">
+        <h2 className="adm-card-title">Shadow deploys récents</h2>
+        <span
+          style={{
+            fontSize: '0.72rem',
+            opacity: 0.4,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {entries.length} / 20
+        </span>
+      </div>
+      <p className="adm-card-hint">
+        Les 20 derniers deploys de la branche <code>master</code>. Chaque push
+        sur <code>master</code> empile l&apos;ancien URL ici avant d&apos;être
+        remplacé. Cliquer « Rollback » passe <code>deploymentDomainShadow</code>{' '}
+        sur ce deploy — pas de re-alias de domaine, propagation ≤ 60s.
+      </p>
+      {entries.length === 0 ? (
+        <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
+          Aucun shadow précédent — le premier apparaîtra ici après le prochain
+          push sur <code>master</code>.
+        </p>
+      ) : (
+        <ul className="adm-deploys" role="list">
+          {entries.map((e) => (
+            <ShadowHistoryRow
+              key={e.url}
+              entry={e}
+              isCurrent={Boolean(
+                currentShadowUrl && currentShadowUrl === e.url,
+              )}
+              disabled={disabled}
+              pending={pendingAction === `rollback-shadow-${e.url}`}
+              onRollback={() => onRollback(e)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ShadowHistoryRow({
+  entry,
+  isCurrent,
+  onRollback,
+  disabled,
+  pending,
+}: {
+  entry: ShadowHistoryEntry;
+  isCurrent: boolean;
+  onRollback: () => void;
+  disabled: boolean;
+  pending: boolean;
+}) {
+  const ref = entry.ref ?? 'master';
+  const sha = entry.sha?.slice(0, 7) ?? '';
+  const msg = entry.message ?? shortHost(entry.url);
+  const state = entry.state;
+  const stateClass =
+    state === 'READY'
+      ? 'adm-deploy-state--ready'
+      : state === 'ERROR'
+        ? 'adm-deploy-state--error'
+        : 'adm-deploy-state--other';
+
+  return (
+    <li className="adm-deploy">
+      <span
+        aria-hidden="true"
+        title={state ?? 'unknown'}
+        className={`adm-deploy-state ${stateClass}`}
+      />
+      <div className="adm-deploy-body">
+        <div className="adm-deploy-message">
+          {msg.split('\n')[0]}
+          {isCurrent && <span className="adm-deploy-current">current</span>}
+        </div>
+        <div className="adm-deploy-meta">
+          <code>{ref}</code>
+          {sha && <code>{sha}</code>}
+          {entry.createdAt && <span>{prettyTimeAgo(entry.createdAt)}</span>}
+          <code>{shortHost(entry.url)}</code>
+        </div>
+      </div>
+      <button
+        type="button"
+        className={`adm-btn adm-btn--small${pending ? ' adm-btn--pending' : ''}`}
+        onClick={onRollback}
+        disabled={disabled || isCurrent || state === 'ERROR'}
+        title={
+          isCurrent
+            ? 'Déjà le shadow actuel'
+            : 'Passer deploymentDomainShadow sur ce deploy'
+        }
+      >
+        {isCurrent ? 'actuel' : 'Rollback'}
+      </button>
+    </li>
   );
 }
 

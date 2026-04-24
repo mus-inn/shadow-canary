@@ -952,30 +952,25 @@
   padding-right: 24px;
 }
 
-.adm-shadow-rollback {
-  display: flex;
+.adm-step-input-wrap {
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  flex-wrap: wrap;
 }
 
-.adm-shadow-rollback-label {
-  font-size: 0.82rem;
-  opacity: 0.75;
+.adm-step-input-wrap::after {
+  content: '%';
+  position: absolute;
+  right: 9px;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.78rem;
 }
 
-.adm-shadow-rollback-urls {
-  font-size: 0.74rem;
-  opacity: 0.55;
-  flex: 1;
-  min-width: 0;
-}
-
-.adm-shadow-rollback-urls code {
-  font-size: 0.74rem;
+.adm-step-input {
+  width: 62px;
+  padding-right: 22px;
+  font-size: 0.85rem;
 }
 
 /* ---------- Bucket forcer ---------- */

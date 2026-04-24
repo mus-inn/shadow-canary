@@ -54,14 +54,28 @@ jobs:
 
           MERGED=$(echo "$CURRENT" | jq \
             --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
-            '. + {
-              deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
-              deploymentDomainShadowPrevious: (
-                if (.deploymentDomainShadow // "") != "" and .deploymentDomainShadow != $shadowUrl
-                then .deploymentDomainShadow
-                else (.deploymentDomainShadowPrevious // null)
+            '. as $cur
+            | (
+                # Prepend the outgoing shadow URL to history iff it exists
+                # and differs from the incoming one. Dedupe while preserving
+                # order (keeps the FIRST occurrence, which is the most
+                # recent). Trim to 20 — matches the admin UI rollback picker.
+                # Commit metadata (sha/ref/ts) is fetched on-demand by the
+                # admin UI from the Vercel API, so history stays compact.
+                if ($cur.deploymentDomainShadow // "") != "" and $cur.deploymentDomainShadow != $shadowUrl then
+                  ([$cur.deploymentDomainShadow] + ($cur.shadowHistory // []))
+                    | reduce .[] as $x ([]; if any(. == $x) then . else . + [$x] end)
+                    | .[0:20]
+                else
+                  ($cur.shadowHistory // [])
                 end
-              ),
+              ) as $history
+            | . + {
+              deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
+              shadowHistory: $history,
+              # Deprecated: kept populated for back-compat with v0.4.x admin
+              # UIs reading the old field. Remove in v0.5.
+              deploymentDomainShadowPrevious: ($history[0] // null),
               deploymentDomainShadow: $shadowUrl,
               trafficShadowPercent: (.trafficShadowPercent // 1),
               trafficProdCanaryPercent: (.trafficProdCanaryPercent // 100),

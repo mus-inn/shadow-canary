@@ -1,5 +1,11 @@
 # @dotworld/shadow-canary-skill
 
+## 0.5.0
+
+### Minor Changes
+
+- Version-aligned with `@dotworld/shadow-canary-core@0.5.0` (shadow history 20 + configurable step). No skill content changes.
+
 ## 0.4.1
 
 ### Patch Changes

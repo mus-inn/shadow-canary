@@ -1,5 +1,17 @@
 # @dotworld/shadow-canary-templates
 
+## 0.5.0
+
+### Minor Changes
+
+- **Deeper shadow rollback** (last 20 deploys):
+  - `deploy-shadow.yml` now prepends the outgoing shadow URL into `shadowHistory` (dedupes, trims to 20) on every push to `master`. Replaces the single `deploymentDomainShadowPrevious` flag from 0.4.x (kept populated for back-compat with v0.4.x admin UIs).
+  - New endpoint `/api/admin/shadow-history` returns the 20 URLs hydrated with commit metadata (sha/ref/message/time) fetched via the Vercel API.
+  - `/api/admin/rollback-shadow` now accepts `{targetUrl?: string}` in the body — lets operators rollback further than one step when the most recent shadows are all known-bad. Backwards compatible: empty body still rolls back to the previous one.
+  - Admin UI: removed the single "Rollback shadow" button from the Shadow traffic card. Added a new "Shadow deploys récents" section mirroring the prod deploys list, with a per-entry "Rollback" button and a "current" badge on the active shadow.
+
+- **Configurable manual canary step**: the MANUEL buttons now accept a step size input (default 4%, range 1–50%). Buttons re-label dynamically: `− 7% (step back)` / `+ 7% (step forward)`. Endpoints accept `{step}` in body.
+
 ## 0.4.1
 
 ### Patch Changes
