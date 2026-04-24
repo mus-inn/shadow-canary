@@ -452,7 +452,7 @@
   display: grid;
   grid-template-columns: 10px 1fr auto;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   font-size: 0.875rem;
 }
 
@@ -462,6 +462,21 @@
   border-radius: 50%;
   background: var(--adm-seg-color);
   box-shadow: 0 0 6px var(--adm-seg-color);
+  margin-top: 5px;
+}
+
+.adm-legend-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.adm-legend-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .adm-legend-label {
@@ -472,13 +487,43 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.76rem;
   opacity: 0.45;
-  margin-left: 8px;
+}
+
+.adm-legend-deploy {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.72rem;
+  opacity: 0.6;
+  flex-wrap: wrap;
+}
+
+.adm-legend-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.adm-legend-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  opacity: 0.7;
+}
+
+.adm-legend-commit {
+  opacity: 0.55;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .adm-legend-value {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   font-size: 0.88rem;
+  padding-top: 2px;
 }
 
 /* ---------- Actions ---------- */

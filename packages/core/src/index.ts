@@ -4,7 +4,7 @@ export {
   clearConfigCache,
 } from './edge-config/read.js';
 export { readShadowConfig, patchShadowConfig } from './edge-config/patch.js';
-export { listDeployments } from './vercel/deployments.js';
+export { listDeployments, getDeploymentByUrl } from './vercel/deployments.js';
 export { promoteDeployment } from './vercel/promote.js';
 export {
   verifyCredentials,

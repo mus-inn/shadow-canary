@@ -14,6 +14,21 @@ type Props = {
   };
 };
 
+type BucketInfo = {
+  url: string;
+  sha: string | null;
+  ref: string | null;
+  message: string | null;
+  createdAt: number | null;
+  state: string | null;
+} | null;
+
+type BucketInfoMap = {
+  shadow: BucketInfo;
+  prodNew: BucketInfo;
+  prodPrevious: BucketInfo;
+};
+
 type Status =
   | 'stable'
   | 'starting'
@@ -95,6 +110,7 @@ function phaseLabel(hour: number): string {
 export function AdminDashboard({ initial }: Props) {
   const [config, setConfig] = useState(initial.config);
   const [deployments, setDeployments] = useState(initial.deployments);
+  const [bucketInfo, setBucketInfo] = useState<BucketInfoMap | null>(null);
   const [error, setError] = useState(initial.error);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -104,9 +120,10 @@ export function AdminDashboard({ initial }: Props) {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [stateRes, deployRes] = await Promise.all([
+      const [stateRes, deployRes, bucketRes] = await Promise.all([
         fetch('/api/admin/state', { cache: 'no-store' }),
         fetch('/api/admin/deployments', { cache: 'no-store' }),
+        fetch('/api/admin/bucket-info', { cache: 'no-store' }),
       ]);
       if (stateRes.ok) {
         const { config: c } = await stateRes.json();
@@ -115,6 +132,9 @@ export function AdminDashboard({ initial }: Props) {
       if (deployRes.ok) {
         const { deployments: d } = await deployRes.json();
         setDeployments(d);
+      }
+      if (bucketRes.ok) {
+        setBucketInfo((await bucketRes.json()) as BucketInfoMap);
       }
       setError(null);
     } catch (e) {
@@ -237,6 +257,7 @@ export function AdminDashboard({ initial }: Props) {
                   color: '#f97316',
                   host: shortHost(shadowHost),
                   active: true,
+                  info: bucketInfo?.shadow,
                 },
                 ...(prevHost
                   ? [
@@ -246,6 +267,7 @@ export function AdminDashboard({ initial }: Props) {
                         color: '#6366f1',
                         host: shortHost(prevHost),
                         active: canaryLive,
+                        info: bucketInfo?.prodPrevious,
                       },
                     ]
                   : []),
@@ -258,6 +280,7 @@ export function AdminDashboard({ initial }: Props) {
                     status === 'ramping' ||
                     status === 'complete-sticky' ||
                     status === 'stable',
+                  info: bucketInfo?.prodNew,
                 },
               ]}
             />
@@ -578,6 +601,7 @@ type Segment = {
   color: string;
   host: string;
   active: boolean;
+  info?: BucketInfo;
 };
 
 function TrafficBar({ segments }: { segments: Segment[] }) {
@@ -609,9 +633,25 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
                 { ['--adm-seg-color' as string]: s.color } as React.CSSProperties
               }
             />
-            <span>
-              <span className="adm-legend-label">{s.label}</span>
-              <code className="adm-legend-host">{s.host}</code>
+            <span className="adm-legend-meta">
+              <span className="adm-legend-label-row">
+                <span className="adm-legend-label">{s.label}</span>
+                <code className="adm-legend-host">{s.host}</code>
+              </span>
+              {s.info && (s.info.ref || s.info.sha) && (
+                <span className="adm-legend-deploy">
+                  {s.info.ref && <code className="adm-legend-ref">{s.info.ref}</code>}
+                  {s.info.sha && (
+                    <code className="adm-legend-sha">@{s.info.sha.slice(0, 7)}</code>
+                  )}
+                  {s.info.message && (
+                    <span className="adm-legend-commit" title={s.info.message}>
+                      {s.info.message.split('\n')[0].slice(0, 60)}
+                      {(s.info.message.split('\n')[0].length > 60) && '…'}
+                    </span>
+                  )}
+                </span>
+              )}
             </span>
             <span className="adm-legend-value">{s.value.toFixed(1)}%</span>
           </li>

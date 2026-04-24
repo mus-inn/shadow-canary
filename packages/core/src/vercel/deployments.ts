@@ -49,3 +49,30 @@ export async function listDeployments(limit = 20): Promise<Deployment[]> {
     .filter((d) => d.meta?.githubCommitRef === 'production')
     .slice(0, limit);
 }
+
+/**
+ * Look up a single deployment by its URL (the per-deploy URL stored in
+ * ShadowConfig, e.g. `https://myapp-abc-team.vercel.app`). Returns `null` when
+ * the URL is empty, invalid, or the deployment no longer exists.
+ *
+ * Used by the admin dashboard to show the commit sha / branch / message for
+ * each bucket (shadow, prod-new, prod-previous).
+ */
+export async function getDeploymentByUrl(
+  url: string | undefined | null,
+): Promise<Deployment | null> {
+  if (!url) return null;
+  const err = checkEnv();
+  if (err) throw new Error(err);
+
+  // Vercel accepts bare hostname as `idOrUrl` path param.
+  const hostname = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!hostname) return null;
+
+  const res = await vercelFetch(
+    `/v13/deployments/${encodeURIComponent(hostname)}`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Deployment lookup failed: ${res.status}`);
+  return (await res.json()) as Deployment;
+}
