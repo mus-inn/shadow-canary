@@ -56,6 +56,12 @@ jobs:
             --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
             '. + {
               deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
+              deploymentDomainShadowPrevious: (
+                if (.deploymentDomainShadow // "") != "" and .deploymentDomainShadow != $shadowUrl
+                then .deploymentDomainShadow
+                else (.deploymentDomainShadowPrevious // null)
+                end
+              ),
               deploymentDomainShadow: $shadowUrl,
               trafficShadowPercent: (.trafficShadowPercent // 1),
               trafficProdCanaryPercent: (.trafficProdCanaryPercent // 100),

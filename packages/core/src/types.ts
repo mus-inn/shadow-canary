@@ -6,6 +6,12 @@ export type ShadowConfig = {
   deploymentDomainProdPrevious?: string;
   // Master branch deploy URL — receives `trafficShadowPercent` of traffic.
   deploymentDomainShadow?: string;
+  // Previous master deploy URL, saved by deploy-shadow.yml before overwriting
+  // `deploymentDomainShadow`. Lets the admin UI swap back to the previous
+  // shadow deploy when the current one regresses (symmetric to the prod
+  // rollback, but no custom-domain re-alias needed — shadow is addressed by
+  // URL directly in the middleware rewrite).
+  deploymentDomainShadowPrevious?: string;
   // Static share routed to the master (shadow) deploy. Canary-independent.
   trafficShadowPercent?: number;
   // Share of the prod bucket that stays on the new prod deploy. Ramps 0→100

@@ -883,6 +883,32 @@
   padding-right: 24px;
 }
 
+.adm-shadow-rollback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  flex-wrap: wrap;
+}
+
+.adm-shadow-rollback-label {
+  font-size: 0.82rem;
+  opacity: 0.75;
+}
+
+.adm-shadow-rollback-urls {
+  font-size: 0.74rem;
+  opacity: 0.55;
+  flex: 1;
+  min-width: 0;
+}
+
+.adm-shadow-rollback-urls code {
+  font-size: 0.74rem;
+}
+
 /* ---------- Bucket forcer ---------- */
 
 .adm-bucket-row {

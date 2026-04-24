@@ -41,7 +41,8 @@ type ModalState =
   | null
   | { kind: 'cancel' }
   | { kind: 'promote' }
-  | { kind: 'rollback'; deploy: Deployment };
+  | { kind: 'rollback'; deploy: Deployment }
+  | { kind: 'rollback-shadow' };
 
 function deriveStatus(cfg: ShadowConfig | null): Status {
   if (!cfg) return 'unknown';
@@ -364,11 +365,15 @@ export function AdminDashboard({ initial }: Props) {
         {/* ---------- Shadow percent ---------- */}
         <ShadowPercentCard
           current={shadowPct}
+          previousShadowUrl={config?.deploymentDomainShadowPrevious}
+          currentShadowUrl={config?.deploymentDomainShadow}
           pending={pendingAction === 'shadow-percent'}
+          pendingRollback={pendingAction === 'rollback-shadow'}
           disabled={isBusy}
           onSave={(value) =>
             void run('shadow-percent', '/api/admin/shadow-percent', { value })
           }
+          onRollback={() => setModal({ kind: 'rollback-shadow' })}
         />
 
         {/* ---------- Phases diagram ---------- */}
@@ -513,6 +518,37 @@ export function AdminDashboard({ initial }: Props) {
             deploymentUrl: d.url.startsWith('http') ? d.url : `https://${d.url}`,
           });
         }}
+      />
+
+      <ConfirmModal
+        open={modal?.kind === 'rollback-shadow'}
+        tone="warn"
+        title="Rollback shadow au deploy précédent ?"
+        body={
+          <>
+            <p style={{ margin: '0 0 10px' }}>
+              Swap <code>deploymentDomainShadow</code> et{' '}
+              <code>deploymentDomainShadowPrevious</code>. Le shadow actuel (
+              <code>{shortHost(config?.deploymentDomainShadow)}</code>) passe
+              en &quot;previous&quot;, le précédent (
+              <code>{shortHost(config?.deploymentDomainShadowPrevious)}</code>)
+              reprend les {shadowPct}% de trafic shadow.
+            </p>
+            <p style={{ margin: 0 }}>
+              Pas de re-alias de domaine (contrairement au rollback prod) —
+              le shadow est adressé directement par URL dans le middleware.
+              Action instantanée et réversible (le swap est symétrique, tu
+              peux cliquer à nouveau pour revenir).
+            </p>
+          </>
+        }
+        confirmPhrase="rollback-shadow"
+        confirmLabel="Rollback shadow"
+        pending={pendingAction === 'rollback-shadow'}
+        onClose={() => setModal(null)}
+        onConfirm={() =>
+          void run('rollback-shadow', '/api/admin/rollback-shadow')
+        }
       />
     </>
   );
@@ -782,14 +818,22 @@ function ActionBtn({
 
 function ShadowPercentCard({
   current,
+  previousShadowUrl,
+  currentShadowUrl,
   pending,
+  pendingRollback,
   disabled,
   onSave,
+  onRollback,
 }: {
   current: number;
+  previousShadowUrl?: string;
+  currentShadowUrl?: string;
   pending: boolean;
+  pendingRollback: boolean;
   disabled: boolean;
   onSave: (value: number) => void;
+  onRollback: () => void;
 }) {
   const [draft, setDraft] = useState<string>(String(current));
 
@@ -842,6 +886,40 @@ function ShadowPercentCard({
             0 – 100 uniquement
           </span>
         )}
+      </div>
+
+      <div className="adm-shadow-rollback">
+        <span className="adm-shadow-rollback-label">
+          Rollback shadow au deploy précédent
+        </span>
+        <span className="adm-shadow-rollback-urls">
+          {currentShadowUrl ? (
+            <>
+              actuel <code>{shortHost(currentShadowUrl)}</code>
+            </>
+          ) : (
+            <em style={{ opacity: 0.5 }}>aucun shadow actuel</em>
+          )}
+          {previousShadowUrl && (
+            <>
+              {' '}
+              · précédent <code>{shortHost(previousShadowUrl)}</code>
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          className={`adm-btn adm-btn--small${pendingRollback ? ' adm-btn--pending' : ''}`}
+          onClick={onRollback}
+          disabled={disabled || !previousShadowUrl}
+          title={
+            previousShadowUrl
+              ? `Swap shadow ↔ previous`
+              : 'Aucun deploy shadow précédent enregistré — le premier swap sera possible après le prochain push master.'
+          }
+        >
+          Rollback shadow
+        </button>
       </div>
     </section>
   );
