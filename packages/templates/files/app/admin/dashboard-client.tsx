@@ -202,7 +202,20 @@ export function AdminDashboard({ initial }: Props) {
     status === 'ramping' || status === 'starting' || status === 'paused';
   const elapsed = startedAt ? now - startedAt : null;
   const hour = parisHour(now);
-  const msToNext = nextCronFireMs(now) - now;
+  // "Next check" is based on the last recorded SLO check + 15min when we have
+  // one (what actually happened), not the theoretical cron schedule. GH Actions
+  // cron has multi-minute latency and can fire at :03 instead of :00 — using
+  // the theoretical next :00/:15/:30/:45 drifts from reality by that margin.
+  // When no SLO check has run yet, fall back to the cron schedule.
+  const lastSloTs = config?.sloChecks?.[0]?.ts
+    ? new Date(config.sloChecks[0].ts).getTime()
+    : null;
+  const expectedNextTs = lastSloTs
+    ? lastSloTs + 15 * 60_000
+    : nextCronFireMs(now);
+  // Signed: positive = still to come, negative = overdue (cron is late).
+  const msToNext = expectedNextTs - now;
+  const nextCheckOverdue = msToNext < 0;
   const activePhase = statusToPhase(status);
 
   const isBusy = pendingAction !== null;
@@ -246,6 +259,7 @@ export function AdminDashboard({ initial }: Props) {
             status={status}
             elapsed={elapsed}
             msToNext={msToNext}
+            overdue={nextCheckOverdue}
             phase={phaseLabel(hour)}
           />
 
@@ -269,6 +283,7 @@ export function AdminDashboard({ initial }: Props) {
                         host: shortHost(prevHost),
                         active: canaryLive,
                         info: bucketInfo?.prodPrevious,
+                        valueHint: `${(100 - canaryPct).toFixed(0)}% du prod`,
                       },
                     ]
                   : []),
@@ -282,6 +297,7 @@ export function AdminDashboard({ initial }: Props) {
                     status === 'complete-sticky' ||
                     status === 'stable',
                   info: bucketInfo?.prodNew,
+                  valueHint: `${canaryPct}% du prod`,
                 },
               ]}
             />
@@ -588,12 +604,14 @@ function TimingLine({
   status,
   elapsed,
   msToNext,
+  overdue,
   phase,
 }: {
   canaryLive: boolean;
   status: Status;
   elapsed: number | null;
   msToNext: number;
+  overdue: boolean;
   phase: string;
 }) {
   const items: React.ReactNode[] = [phase];
@@ -602,12 +620,21 @@ function TimingLine({
   }
   if (status === 'ramping' || status === 'starting') {
     items.push(
-      <>
-        Prochain check dans{' '}
-        <span className="adm-timing-countdown">
-          {formatDuration(msToNext)}
-        </span>
-      </>,
+      overdue ? (
+        <>
+          Check attendu{' '}
+          <span className="adm-timing-countdown adm-timing-countdown--overdue">
+            il y a {formatDuration(-msToNext)}
+          </span>
+        </>
+      ) : (
+        <>
+          Prochain check dans{' '}
+          <span className="adm-timing-countdown">
+            {formatDuration(msToNext)}
+          </span>
+        </>
+      ),
     );
   } else if (status === 'paused') {
     items.push(<>Pause · cron skippé</>);
@@ -641,6 +668,10 @@ type Segment = {
   host: string;
   active: boolean;
   info?: BucketInfo;
+  // Optional secondary number shown after the main %. Example: "8% du prod"
+  // on the new-prod bucket so the operator can map the traffic share (7.9%
+  // of total) back to the canary knob (8% of prod).
+  valueHint?: string;
 };
 
 function TrafficBar({ segments }: { segments: Segment[] }) {
@@ -692,7 +723,12 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
                 </span>
               )}
             </span>
-            <span className="adm-legend-value">{s.value.toFixed(1)}%</span>
+            <span className="adm-legend-value">
+              {s.value.toFixed(1)}%
+              {s.valueHint && (
+                <span className="adm-legend-value-hint">{s.valueHint}</span>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -707,6 +743,16 @@ function SloLog({
   checks: NonNullable<ShadowConfig['sloChecks']>;
   now: number;
 }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const toggle = useCallback((i: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }, []);
+
   return (
     <section className="adm-card">
       <div className="adm-card-header">
@@ -729,7 +775,8 @@ function SloLog({
         ne tourne pas ; si elle est pleine de{' '}
         <span className="adm-slo-ok-inline">✓</span>, le ramp avance ; des{' '}
         <span className="adm-slo-ko-inline">✗</span> indiquent un SLO qui a
-        rollback.
+        rollback. Clique sur une ligne pour voir le body complet du dernier
+        probe.
       </p>
       {checks.length === 0 ? (
         <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
@@ -744,32 +791,67 @@ function SloLog({
             const fullTs = new Date(c.ts).toLocaleString('fr-FR');
             const codes = c.codes.map((x) => x || '—').join(' / ');
             const isRollback = !c.ok && c.pctAfter === 0;
+            const isOpen = expanded.has(i);
+            const hasBody = Boolean(c.bodyExcerpt);
             return (
               <li
                 key={`${c.ts}-${i}`}
-                className={`adm-slo-row ${c.ok ? 'adm-slo-row--ok' : 'adm-slo-row--ko'}`}
+                className={`adm-slo-row ${c.ok ? 'adm-slo-row--ok' : 'adm-slo-row--ko'}${hasBody ? ' adm-slo-row--clickable' : ''}`}
               >
-                <span className="adm-slo-icon" aria-hidden="true">
-                  {c.ok ? '✓' : '✗'}
-                </span>
-                <span className="adm-slo-time" title={fullTs}>
-                  {ago}
-                </span>
-                <code className="adm-slo-codes">{codes}</code>
-                <span className="adm-slo-pct">
-                  {c.pctBefore}% →{' '}
-                  <strong>{c.pctAfter}%</strong>
-                  {isRollback && (
-                    <span className="adm-slo-badge">rollback</span>
+                <button
+                  type="button"
+                  className="adm-slo-summary"
+                  onClick={() => hasBody && toggle(i)}
+                  disabled={!hasBody}
+                  aria-expanded={isOpen}
+                  aria-label={
+                    hasBody
+                      ? isOpen
+                        ? 'Masquer le body complet'
+                        : 'Afficher le body complet'
+                      : 'Aucun body enregistré'
+                  }
+                >
+                  <span className="adm-slo-icon" aria-hidden="true">
+                    {c.ok ? '✓' : '✗'}
+                  </span>
+                  <span className="adm-slo-time" title={fullTs}>
+                    {ago}
+                  </span>
+                  <code className="adm-slo-codes">{codes}</code>
+                  <span className="adm-slo-pct">
+                    {c.pctBefore}% →{' '}
+                    <strong>{c.pctAfter}%</strong>
+                    {isRollback && (
+                      <span className="adm-slo-badge">rollback</span>
+                    )}
+                  </span>
+                  {hasBody && (
+                    <span
+                      className="adm-slo-caret"
+                      aria-hidden="true"
+                    >
+                      {isOpen ? '▾' : '▸'}
+                    </span>
                   )}
-                </span>
-                {c.bodyExcerpt && (
-                  <code
-                    className="adm-slo-body"
-                    title={c.bodyExcerpt}
+                </button>
+                {hasBody && (
+                  <div
+                    className={`adm-slo-body-wrap${isOpen ? ' adm-slo-body-wrap--open' : ''}`}
                   >
-                    {c.bodyExcerpt}
-                  </code>
+                    {isOpen ? (
+                      <pre className="adm-slo-body-full">{c.bodyExcerpt}</pre>
+                    ) : (
+                      <code
+                        className="adm-slo-body-preview"
+                        title={c.bodyExcerpt}
+                      >
+                        {c.bodyExcerpt.length > 80
+                          ? c.bodyExcerpt.slice(0, 80) + '…'
+                          : c.bodyExcerpt}
+                      </code>
+                    )}
+                  </div>
                 )}
               </li>
             );

@@ -383,6 +383,11 @@
   color: rgba(255, 255, 255, 0.75);
 }
 
+.adm-timing-countdown--overdue {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
 /* ---------- Traffic bar ---------- */
 
 .adm-bar-wrap {
@@ -524,6 +529,16 @@
   font-weight: 500;
   font-size: 0.88rem;
   padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.adm-legend-value-hint {
+  font-size: 0.68rem;
+  font-weight: 400;
+  opacity: 0.5;
 }
 
 /* ---------- SLO log ---------- */
@@ -538,15 +553,11 @@
 }
 
 .adm-slo-row {
-  display: grid;
-  grid-template-columns: 16px auto auto 1fr auto;
-  align-items: center;
-  gap: 10px;
   font-size: 0.82rem;
-  padding: 6px 10px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.02);
   border-left: 2px solid transparent;
+  overflow: hidden;
 }
 
 .adm-slo-row--ok {
@@ -556,6 +567,32 @@
 .adm-slo-row--ko {
   border-left-color: #ef4444;
   background: rgba(239, 68, 68, 0.05);
+}
+
+.adm-slo-summary {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 16px auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: inherit;
+  padding: 6px 10px;
+  width: 100%;
+  cursor: default;
+}
+
+.adm-slo-row--clickable .adm-slo-summary {
+  cursor: pointer;
+}
+
+.adm-slo-row--clickable .adm-slo-summary:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.adm-slo-summary:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.3);
+  outline-offset: -1px;
 }
 
 .adm-slo-icon {
@@ -603,7 +640,23 @@
   font-weight: 600;
 }
 
-.adm-slo-body {
+.adm-slo-caret {
+  opacity: 0.45;
+  font-size: 0.75rem;
+  margin-left: 6px;
+  transition: opacity 0.12s;
+}
+
+.adm-slo-row--clickable .adm-slo-summary:hover .adm-slo-caret {
+  opacity: 0.85;
+}
+
+.adm-slo-body-wrap {
+  padding: 0 10px 0 36px;
+}
+
+.adm-slo-body-preview {
+  display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.7rem;
   opacity: 0.5;
@@ -611,9 +664,25 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  grid-column: 1 / -1;
-  padding-left: 26px;
-  padding-top: 2px;
+  padding-bottom: 6px;
+}
+
+.adm-slo-body-wrap--open {
+  padding-bottom: 10px;
+}
+
+.adm-slo-body-full {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  opacity: 0.8;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .adm-slo-ok-inline {

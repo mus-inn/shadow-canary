@@ -1,5 +1,14 @@
 # @dotworld/shadow-canary-templates
 
+## 0.4.1
+
+### Patch Changes
+
+- **Admin UX polish** on top of 0.4.0:
+  - **Timer accuracy**: "Prochain check dans Xm Ys" is now computed from `lastSloCheck.ts + 15min` instead of the theoretical next cron firing time. GH Actions cron has multi-minute latency, so the theoretical schedule drifts from reality. When overdue, the label switches to "Check attendu il y a Xm" in amber so operators see the cron is late.
+  - **Pct clarity**: the traffic-bar legend now shows the share of prod alongside the share of total on prod buckets — e.g. "7.9%" with "8% du prod" underneath. Resolves the confusion where the canary pct (8%) didn't visually match the legend (7.9% = 8% × 99% of non-shadow traffic).
+  - **Expandable SLO body**: `canary-ramp.yml` bumps the SLO response body truncation from 80 → 500 chars. Admin UI makes each SLO log row clickable with a caret — clicking expands to a scrollable `<pre>` block showing the full stored body. Lets operators read full JSON / error payloads that used to be cut mid-field.
+
 ## 0.4.0
 
 ### Minor Changes

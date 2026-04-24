@@ -105,8 +105,11 @@ jobs:
           for i in 1 2; do
             CODE=$(curl -s -o /tmp/slo_body.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
             BODY=$(cat /tmp/slo_body.txt 2>/dev/null || true)
-            # Trim to 80 chars, strip newlines/CR for YAML-safe single-line output
-            BODY_TRIMMED="$(echo "${BODY:0:80}" | tr '\n\r' '  ')"
+            # Trim to 500 chars, strip newlines/CR for YAML-safe single-line output.
+            # 500 gives enough room to show a full JSON payload or a truncated
+            # stack trace without blowing the Edge Config 8 KB per-item cap
+            # (10 entries × 500 B ≈ 5 KB, plus the rest of ShadowConfig).
+            BODY_TRIMMED="$(echo "${BODY:0:500}" | tr '\n\r' '  ')"
             echo "SLO check $i → HTTP $CODE :: $BODY_TRIMMED"
             if [ "$CODE" = "200" ]; then OK=$((OK + 1)); fi
             echo "code$i=$CODE" >> "$GITHUB_OUTPUT"

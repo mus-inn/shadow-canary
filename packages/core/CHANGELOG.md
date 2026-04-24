@@ -1,5 +1,11 @@
 # @dotworld/shadow-canary-core
 
+## 0.4.1
+
+### Patch Changes
+
+- No public API changes; ships alongside `@dotworld/shadow-canary-templates@0.4.1` admin UX fixes (timer accuracy, pct clarity, expandable SLO body). See templates changelog.
+
 ## 0.4.0
 
 ### Minor Changes
