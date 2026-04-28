@@ -13,6 +13,35 @@ export default defineConfig({
         src: './public/favicon.svg',
       },
       favicon: '/favicon.svg',
+      // Render Mermaid diagrams client-side. The `rehype-mermaid` plugin runs
+      // with strategy 'pre-mermaid' (no Playwright at build time), which only
+      // emits <pre class="mermaid"> markers — without this loader they show as
+      // raw text. Theme tracks Starlight's data-theme so diagrams stay legible
+      // when the user toggles light/dark.
+      head: [
+        {
+          tag: 'script',
+          attrs: { type: 'module' },
+          content: `
+            import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+            const render = () => {
+              const isDark = document.documentElement.dataset.theme !== 'light';
+              mermaid.initialize({
+                startOnLoad: false,
+                theme: isDark ? 'dark' : 'default',
+                securityLevel: 'loose',
+              });
+              const nodes = document.querySelectorAll('pre.mermaid:not([data-processed])');
+              if (nodes.length) mermaid.run({ nodes });
+            };
+            render();
+            new MutationObserver(render).observe(document.documentElement, {
+              attributes: true,
+              attributeFilter: ['data-theme'],
+            });
+          `,
+        },
+      ],
       defaultLocale: 'en',
       locales: {
         root: {
