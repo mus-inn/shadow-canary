@@ -146,7 +146,18 @@ vi.mock('../edge-config/read.js', () => ({
 // Import after mocks are set up
 // ---------------------------------------------------------------------------
 
-const { shadowCanaryMiddleware } = await import('../middleware/compose.js');
+const { shadowCanaryMiddleware, shadowCanaryProxy } = await import(
+  '../middleware/compose.js'
+);
+
+describe('shadowCanaryProxy alias (Next.js 16 ergonomics)', () => {
+  // The v16 rename only changes the host file/function name, not the wire
+  // API — guard that the alias stays a strict reference, not a re-implementation
+  // that could drift.
+  it('is the same function reference as shadowCanaryMiddleware', () => {
+    expect(shadowCanaryProxy).toBe(shadowCanaryMiddleware);
+  });
+});
 const { getShadowConfig } = await import('../edge-config/read.js');
 
 const mockGetShadowConfig = getShadowConfig as ReturnType<typeof vi.fn>;

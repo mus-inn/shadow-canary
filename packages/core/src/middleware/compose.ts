@@ -86,13 +86,28 @@ function rewriteTo(
  * `null` when the request should pass through — the caller is responsible for
  * returning `NextResponse.next()` in that case.
  *
+ * Runtime-agnostic: works in both Edge runtime (Next.js 15 `middleware.ts`,
+ * Next.js 16 `middleware.ts` deprecated path) and Node.js runtime (Next.js 16
+ * `proxy.ts`). For idiomatic v16 code, import the {@link shadowCanaryProxy}
+ * alias instead — it's the same function, named for the v16 file convention.
+ *
  * @example
- * // middleware.ts in the host project
+ * // Next.js 15 / Next.js 16 Edge — middleware.ts
  * import { shadowCanaryMiddleware } from '@dotworld/shadow-canary-core/edge';
  * import { NextRequest, NextResponse } from 'next/server';
  *
  * export async function middleware(req: NextRequest) {
  *   const res = await shadowCanaryMiddleware(req);
+ *   return res ?? NextResponse.next();
+ * }
+ *
+ * @example
+ * // Next.js 16 — proxy.ts (Node runtime)
+ * import { shadowCanaryProxy } from '@dotworld/shadow-canary-core';
+ * import { NextRequest, NextResponse } from 'next/server';
+ *
+ * export async function proxy(req: NextRequest) {
+ *   const res = await shadowCanaryProxy(req);
  *   return res ?? NextResponse.next();
  * }
  */
@@ -248,3 +263,21 @@ export async function shadowCanaryMiddleware(
 
   return res; // null (passthrough) or rewrite to previous
 }
+
+/**
+ * Alias of {@link shadowCanaryMiddleware} matching the Next.js 16 `proxy.ts`
+ * file convention. Identical function — same options, same return shape.
+ *
+ * Next.js 16 (Oct 2025) renamed `middleware.ts` → `proxy.ts` and the exported
+ * function `middleware()` → `proxy()`. The legacy name still works on v16
+ * (deprecated, edge-runtime only); `proxy.ts` runs on the Node.js runtime.
+ * The wire-level API (`NextRequest`, `NextResponse`, `config.matcher`) is
+ * unchanged, so this lib's function is identical across both — only the
+ * file/function name in the host project differs.
+ *
+ * @see https://nextjs.org/docs/messages/middleware-to-proxy
+ */
+export const shadowCanaryProxy = shadowCanaryMiddleware;
+
+/** Alias of {@link ShadowCanaryMiddlewareOptions} for v16 `proxy.ts` ergonomics. */
+export type ShadowCanaryProxyOptions = ShadowCanaryMiddlewareOptions;

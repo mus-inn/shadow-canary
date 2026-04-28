@@ -104,6 +104,37 @@ This guide adds shadow-canary to an existing Next.js 13.4+ App Router project. I
    The middleware matcher excludes `/admin` by design — the admin UI always runs on the current prod deploy, never rewritten to shadow or previous.
    </Aside>
 
+   #### Next.js 16: `proxy.ts`
+
+   Next.js 16 (Oct 2025) renamed the file convention from `middleware.ts` → `proxy.ts` and the exported function from `middleware()` → `proxy()`. Both names still work on v16 — `middleware.ts` is deprecated but is the only path for Edge runtime; `proxy.ts` runs on the Node.js runtime.
+
+   The wire-level API (`NextRequest`, `NextResponse`, `config.matcher`) is unchanged, so `shadowCanaryMiddleware` works identically across both. We expose `shadowCanaryProxy` as an alias matching the v16 naming:
+
+   ```typescript
+   // proxy.ts (Next.js 16, Node runtime)
+   import { NextRequest, NextResponse } from 'next/server';
+   import { shadowCanaryProxy } from '@dotworld/shadow-canary-core';
+
+   export async function proxy(req: NextRequest) {
+     const res = await shadowCanaryProxy(req);
+     return res ?? NextResponse.next();
+   }
+
+   export const config = {
+     matcher: [
+       '/((?!api|_next/static|_next/image|favicon.ico|admin|.*\\..*).*)',
+     ],
+   };
+   ```
+
+   <Aside type="note">
+   Two things to know if you're picking the file convention on Next.js 16:
+   - **`proxy.ts` runs on Node.js**, not Edge. Setting `runtime: 'edge'` in `proxy.ts` throws.
+   - **`middleware.ts` stays Edge-only on v16** and is deprecated. If you depend on Edge runtime semantics (lower cold start, geographic distribution), keep `middleware.ts` until v17.
+
+   To migrate an existing v15 project to the v16 file convention, Vercel ships a codemod: `npx @next/codemod@canary middleware-to-proxy .`
+   </Aside>
+
 5. **Add the three workflows**
 
    Copy `.github/workflows/` from the template or monorepo into your project:

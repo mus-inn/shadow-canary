@@ -8,7 +8,9 @@ export {
 } from './edge-config/read.js';
 export {
   shadowCanaryMiddleware,
+  shadowCanaryProxy,
   type ShadowCanaryMiddlewareOptions,
+  type ShadowCanaryProxyOptions,
 } from './middleware/compose.js';
 export {
   getBuildInfo,

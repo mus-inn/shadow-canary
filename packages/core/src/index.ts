@@ -6,6 +6,14 @@ export {
 export { readShadowConfig, patchShadowConfig } from './edge-config/patch.js';
 export { listDeployments, getDeploymentByUrl } from './vercel/deployments.js';
 export { promoteDeployment } from './vercel/promote.js';
+// Middleware function is runtime-agnostic — exported here too so Next.js 16
+// `proxy.ts` files (Node runtime) can import without the `/edge` subpath.
+export {
+  shadowCanaryMiddleware,
+  shadowCanaryProxy,
+  type ShadowCanaryMiddlewareOptions,
+  type ShadowCanaryProxyOptions,
+} from './middleware/compose.js';
 export {
   verifyCredentials,
   createSessionToken,

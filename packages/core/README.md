@@ -27,7 +27,7 @@ pnpm add next @vercel/edge-config
 
 ## Usage
 
-### Drop-in middleware (edge entry)
+### Drop-in middleware (Next.js 15, or Next.js 16 Edge)
 
 ```ts
 // middleware.ts
@@ -43,6 +43,31 @@ export async function middleware(req: NextRequest) {
   return res ?? NextResponse.next();
 }
 ```
+
+### Drop-in proxy (Next.js 16, Node runtime)
+
+Next.js 16 renamed `middleware.ts` → `proxy.ts` (and the exported function
+`middleware()` → `proxy()`). `proxy.ts` runs on the Node.js runtime — for
+Edge runtime semantics, keep `middleware.ts` (still supported on v16,
+deprecated). The lib's function is identical across both — we just expose
+`shadowCanaryProxy` as an alias matching the v16 naming:
+
+```ts
+// proxy.ts
+import { shadowCanaryProxy } from '@dotworld/shadow-canary-core';
+import { NextRequest, NextResponse } from 'next/server';
+
+export const config = {
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|admin|.*\\..*).*)'],
+};
+
+export async function proxy(req: NextRequest) {
+  const res = await shadowCanaryProxy(req);
+  return res ?? NextResponse.next();
+}
+```
+
+Migrating an existing v15 install: `npx @next/codemod@canary middleware-to-proxy .`
 
 ### Composing with existing middleware
 
