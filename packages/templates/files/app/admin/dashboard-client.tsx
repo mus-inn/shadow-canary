@@ -82,8 +82,9 @@ function stepSize(draft: string): number | null {
   return Math.round(n);
 }
 
-function prettyTimeAgo(ms: number): string {
-  const diff = Date.now() - ms;
+function prettyTimeAgo(ms: number, now: number | null): string {
+  if (now === null) return '—';
+  const diff = now - ms;
   const m = Math.floor(diff / 60_000);
   if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
@@ -175,9 +176,12 @@ export function AdminDashboard({ initial }: Props) {
   }, [refresh]);
 
   // Wall-clock ticker — separate from the 10s data refresh so the countdown
-  // ticks smoothly without triggering network calls.
-  const [now, setNow] = useState(() => Date.now());
+  // ticks smoothly without triggering network calls. `now` is null on SSR +
+  // first hydration so time-dependent text doesn't mismatch between server
+  // and client renders (React error #418).
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -224,8 +228,8 @@ export function AdminDashboard({ initial }: Props) {
     : null;
   const canaryLive =
     status === 'ramping' || status === 'starting' || status === 'paused';
-  const elapsed = startedAt ? now - startedAt : null;
-  const hour = parisHour(now);
+  const elapsed = startedAt !== null && now !== null ? now - startedAt : null;
+  const hour = now !== null ? parisHour(now) : null;
   // "Next check" is based on the last recorded SLO check + 15min when we have
   // one (what actually happened), not the theoretical cron schedule. GH Actions
   // cron has multi-minute latency and can fire at :03 instead of :00 — using
@@ -234,12 +238,16 @@ export function AdminDashboard({ initial }: Props) {
   const lastSloTs = config?.sloChecks?.[0]?.ts
     ? new Date(config.sloChecks[0].ts).getTime()
     : null;
-  const expectedNextTs = lastSloTs
-    ? lastSloTs + 15 * 60_000
-    : nextCronFireMs(now);
+  const expectedNextTs =
+    lastSloTs !== null
+      ? lastSloTs + 15 * 60_000
+      : now !== null
+        ? nextCronFireMs(now)
+        : null;
   // Signed: positive = still to come, negative = overdue (cron is late).
-  const msToNext = expectedNextTs - now;
-  const nextCheckOverdue = msToNext < 0;
+  const msToNext =
+    expectedNextTs !== null && now !== null ? expectedNextTs - now : null;
+  const nextCheckOverdue = msToNext !== null && msToNext < 0;
   const activePhase = statusToPhase(status);
 
   const isBusy = pendingAction !== null;
@@ -284,7 +292,7 @@ export function AdminDashboard({ initial }: Props) {
             elapsed={elapsed}
             msToNext={msToNext}
             overdue={nextCheckOverdue}
-            phase={phaseLabel(hour)}
+            phase={hour !== null ? phaseLabel(hour) : null}
           />
 
           <div className="adm-bar-wrap">
@@ -464,6 +472,7 @@ export function AdminDashboard({ initial }: Props) {
           onRollback={(entry) =>
             setModal({ kind: 'rollback-shadow', target: entry })
           }
+          now={now}
         />
 
         {/* ---------- Phases diagram ---------- */}
@@ -508,6 +517,7 @@ export function AdminDashboard({ initial }: Props) {
                     disabled={isBusy || isCurrent || d.state !== 'READY'}
                     pending={pendingAction === `rollback-${d.uid}`}
                     onRollback={() => setModal({ kind: 'rollback', deploy: d })}
+                    now={now}
                   />
                 );
               })}
@@ -703,15 +713,16 @@ function TimingLine({
   canaryLive: boolean;
   status: Status;
   elapsed: number | null;
-  msToNext: number;
+  msToNext: number | null;
   overdue: boolean;
-  phase: string;
+  phase: string | null;
 }) {
-  const items: React.ReactNode[] = [phase];
+  const items: React.ReactNode[] = [];
+  if (phase !== null) items.push(phase);
   if (elapsed !== null) {
     items.push(<>Démarré il y a {formatDuration(elapsed)}</>);
   }
-  if (status === 'ramping' || status === 'starting') {
+  if ((status === 'ramping' || status === 'starting') && msToNext !== null) {
     items.push(
       overdue ? (
         <>
@@ -733,6 +744,7 @@ function TimingLine({
     items.push(<>Pause · cron skippé</>);
   }
 
+  if (items.length === 0) return null;
   if (items.length === 1 && status === 'stable') return null;
 
   return (
@@ -853,7 +865,7 @@ function SloLog({
   now,
 }: {
   checks: NonNullable<ShadowConfig['sloChecks']>;
-  now: number;
+  now: number | null;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const toggle = useCallback((i: number) => {
@@ -899,8 +911,17 @@ function SloLog({
         <ul className="adm-slo-list" role="list">
           {checks.map((c, i) => {
             const ts = new Date(c.ts).getTime();
-            const ago = prettyTimeAgo(ts);
-            const fullTs = new Date(c.ts).toLocaleString('fr-FR');
+            const ago = prettyTimeAgo(ts, now);
+            // Render the full timestamp only after mount — `toLocaleString`
+            // without explicit timeZone uses the runtime's default tz, which
+            // differs between server (UTC on Vercel) and client (user local),
+            // producing different attribute strings → React error #418.
+            const fullTs =
+              now !== null
+                ? new Date(c.ts).toLocaleString('fr-FR', {
+                    timeZone: 'Europe/Paris',
+                  })
+                : '';
             const codes = c.codes.map((x) => x || '—').join(' / ');
             const isRollback = !c.ok && c.pctAfter === 0;
             const isOpen = expanded.has(i);
@@ -1083,12 +1104,14 @@ function ShadowHistorySection({
   pendingAction,
   disabled,
   onRollback,
+  now,
 }: {
   entries: ShadowHistoryEntry[];
   currentShadowUrl?: string;
   pendingAction: string | null;
   disabled: boolean;
   onRollback: (entry: ShadowHistoryEntry) => void;
+  now: number | null;
 }) {
   return (
     <section className="adm-card">
@@ -1128,6 +1151,7 @@ function ShadowHistorySection({
               disabled={disabled}
               pending={pendingAction === `rollback-shadow-${e.url}`}
               onRollback={() => onRollback(e)}
+              now={now}
             />
           ))}
         </ul>
@@ -1142,12 +1166,14 @@ function ShadowHistoryRow({
   onRollback,
   disabled,
   pending,
+  now,
 }: {
   entry: ShadowHistoryEntry;
   isCurrent: boolean;
   onRollback: () => void;
   disabled: boolean;
   pending: boolean;
+  now: number | null;
 }) {
   const ref = entry.ref ?? 'master';
   const sha = entry.sha?.slice(0, 7) ?? '';
@@ -1175,7 +1201,7 @@ function ShadowHistoryRow({
         <div className="adm-deploy-meta">
           <code>{ref}</code>
           {sha && <code>{sha}</code>}
-          {entry.createdAt && <span>{prettyTimeAgo(entry.createdAt)}</span>}
+          {entry.createdAt && <span>{prettyTimeAgo(entry.createdAt, now)}</span>}
           <code>{shortHost(entry.url)}</code>
         </div>
       </div>
@@ -1202,12 +1228,14 @@ function DeploymentRow({
   onRollback,
   disabled,
   pending,
+  now,
 }: {
   deployment: Deployment;
   isCurrent: boolean;
   onRollback: () => void;
   disabled: boolean;
   pending: boolean;
+  now: number | null;
 }) {
   const ref = deployment.meta?.githubCommitRef ?? '—';
   const sha = deployment.meta?.githubCommitSha?.slice(0, 7) ?? '';
@@ -1235,7 +1263,7 @@ function DeploymentRow({
         <div className="adm-deploy-meta">
           <code>{ref}</code>
           {sha && <code>{sha}</code>}
-          <span>{prettyTimeAgo(deployment.createdAt)}</span>
+          <span>{prettyTimeAgo(deployment.createdAt, now)}</span>
           <code>{shortHost(deployment.url)}</code>
         </div>
       </div>
