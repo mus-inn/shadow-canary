@@ -1,7 +1,56 @@
 ---
 title: Changelog
-description: Release history for shadow-canary.
+description: Release history for shadow-canary. Newest first.
 ---
+
+The three packages (`@dotworld/shadow-canary-core`, `…-templates`, `…-skill`) version together via Changesets — bumping any of them bumps all three to the same version. Each entry below points at what changed at the user level; the per-package CHANGELOGs on GitHub have the granular per-package detail.
+
+## v0.6.0
+
+**New: runtime info helper for Sentry / PostHog telemetry.** Two exports — `getBuildInfo()` (sync, env vars only) and `getRuntimeBucket()` (async, queries Edge Config) — return which deploy slot the running code lives in plus commit / branch / region metadata. The `bucket` field disambiguates `prod-current` vs `prod-previous` so canary regressions can be filtered in Sentry / PostHog by the bucket actually serving the broken request, instead of seeing a blended "production" environment.
+
+```ts
+import { getBuildInfo, getRuntimeBucket } from '@dotworld/shadow-canary-core';
+
+const info = getBuildInfo();
+// { slot: 'production-track', commitShaShort: 'abc1234', branch: 'production', ... }
+
+const runtime = await getRuntimeBucket();
+// { bucket: 'prod-current', resolvedFromEdgeConfig: true, ... }
+```
+
+Plus `formatBuildInfoTag()` for one-line log prefixes / debug headers (`[prod-current @ production abc1234]`). Exported from both Node and edge entry points.
+
+Full integration recipes: **[Runtime info reference](/shadow-canary/reference/runtime-info/)** — covers `Sentry.init` config, `posthog.register()`, and three patterns (server prop / inline `<script>` / API route) for surfacing build info to client code.
+
+**Fix:** admin dashboard React hydration mismatch (`error #418`) caused by server-rendered timestamps differing from client (`Date.now()` drift, locale-default timezone for `toLocaleString`). The dashboard now defers time-derived text to after mount; SSR shows `'—'` placeholders.
+
+## v0.5.0 → v0.5.1
+
+**Deeper shadow rollback (last 20 deploys).** `ShadowConfig` gains `shadowHistory?: string[]` — a ring buffer of the 20 most recent shadow deploy URLs. `deploy-shadow.yml` prepends to it on every push to `master`. The admin gets a "Shadow deploys récents" section with per-entry rollback, mirroring the prod deploys list — operators can now go further back than one step when the most recent shadows are all known-bad.
+
+`/api/admin/rollback-shadow` accepts `{targetUrl?: string}` (back-compat with empty body).
+
+`deploymentDomainShadowPrevious` is now **deprecated** but still populated with `shadowHistory[0]` for v0.4.x admin UI compat. Will be removed in v0.7.
+
+**Configurable manual canary step.** The MANUEL buttons on the admin take a step-size input (default `4`, range `1–50`). Buttons re-label dynamically (`+ 7% (step forward)`). Endpoints `/api/admin/canary/step-forward` and `/step-back` accept `{step?: number}`.
+
+**Patch (0.5.1):** admin traffic-bar legend now shows the **canary knob values** the workflow actually mutates (`new prod 9% du prod`, `previous prod 91% du prod`, `shadow 1% du total`) instead of the effective traffic share — resolves the confusion where the SLO log said `5% → 9%` but the legend said `8.9%` (a 0.1pt gap from shadow eating 1% of total before the prod split). Bar widths stay proportional to actual share; a small secondary line surfaces the effective % when shadow is non-zero.
+
+## v0.4.0 → v0.4.1
+
+**Admin dashboard improvements.** Four features land at once, no breaking changes for host projects that re-copy the template.
+
+- **Version / branch per bucket.** Traffic-bar legend now displays the branch name and short commit SHA under each bucket URL (shadow, prod-new, prod-previous). New `getDeploymentByUrl()` helper exported from core; new `/api/admin/bucket-info` endpoint.
+- **SLO check log.** `canary-ramp.yml` writes each check result to a ring buffer in Edge Config (`sloChecks`, last 10). Admin renders a timeline with pass/fail icon, timestamp, HTTP codes, pct transition, and body excerpt — empty list ⇒ cron isn't running, ✗ ⇒ SLO failed → rollback. New exported type `SloCheck`.
+- **Shadow rollback v1.** `deploy-shadow.yml` saves the current shadow URL into `deploymentDomainShadowPrevious` before overwriting on each push. Admin gets a "Rollback shadow" button that swaps the two URLs symmetrically. New `/api/admin/rollback-shadow` endpoint. (Superseded by `shadowHistory` in 0.5.0.)
+- **Bug fix.** Removed the dead `/debug` link from the Bucket forcer.
+
+**Patch (0.4.1):**
+
+- **Timer accuracy.** "Prochain check dans …" is now computed from `lastSloCheck.ts + 15min` (what actually happened) instead of the theoretical cron firing time. GH Actions cron has multi-minute latency, so the theoretical schedule drifts. Overdue label switches to "Check attendu il y a …" in amber.
+- **Pct clarity.** Legend shows the share of prod alongside the share of total on prod buckets (e.g. "7.9%" with "8% du prod" underneath) — resolves the 7.9% / 8% mismatch confusion.
+- **Expandable SLO body.** Body truncation in `canary-ramp.yml` bumped 80 → 500 chars. Each SLO log row is clickable to expand the full payload — useful for reading the full JSON / error response that triggered a rollback.
 
 ## v0.3.0
 
@@ -24,16 +73,23 @@ description: Release history for shadow-canary.
 4. **Copy your Edge Config value to the new key.** In the Edge Config store's Items tab, duplicate the value from `shadow-configuration` (or your custom key) into a new item at `shadow-<repo-slug>-canary`. Without this step, the middleware reads `null` on the first post-upgrade deploy — the next `deploy-shadow.yml` run will repopulate `deploymentDomainShadow`, `trafficShadowPercent`, `trafficProdCanaryPercent`, but any custom `shadowForceIPs` entries need to be carried manually.
 5. For local dev: add `VERCEL_GIT_REPO_SLUG=<your-repo-slug>` to `.env.local` (or run `vercel env pull`).
 
-See the [core changelog](https://github.com/mus-inn/shadow-canary/blob/master/packages/core/CHANGELOG.md) for the full API diff.
+## v0.2.x
 
-## v1.0.0
+Series of patch releases on the original 0.2.0 design (configurable Edge Config key via `SHADOW_CANARY_KEY`). Superseded by v0.3.0's deterministic key — these versions are still on npm but no longer recommended for new installs.
 
-Initial release.
+- **0.2.4** — guardrails against the silent-shadow trap: runtime `console.warn` when the Edge Config key returns no value, pre-flight verification in workflows that the GH Actions secret matches the Vercel project env var.
+- **0.2.3** — configurable production branch (`productionBranch` option, `SHADOW_CANARY_PRODUCTION_BRANCH` env var). Default `'production'`; pass `''` to disable the branch filter.
+- **0.2.2** — auto-wire Vercel Deployment Protection bypass on rewrites (`x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie: samesitenone`, sourced from `VERCEL_AUTOMATION_BYPASS_SECRET`).
+- **0.2.1** — workflows honor `SHADOW_CANARY_KEY` (was hardcoded to `'shadow-configuration'`, breaking shared Edge Config store setups).
 
-- Shadow slot: permanent 1% of production traffic on `master`, configurable via `trafficShadowPercent`
-- Canary ramp: SLO-gated 0→100% ramp on `production` merges, +4%/15min (Europe/Paris curve)
+## Initial release
+
+Baseline shadow-canary feature set:
+
+- **Shadow slot**: permanent 1% of production traffic on `master`, configurable via `trafficShadowPercent`
+- **Canary ramp**: SLO-gated 0→100% ramp on `production` merges, +4%/15min (Europe/Paris curve)
 - Three GitHub Actions workflows: `deploy-shadow.yml`, `deploy-prod.yml`, `canary-ramp.yml`
-- Single Edge Config key (derived from repo slug) as the source of truth for routing state
+- Single Edge Config key as the source of truth for routing state
 - Commit markers: `[skip-canary]` for direct promotes, `[keep-canary]` for fix-in-place
 - `/debug` page with bucket display and force-override buttons
 - `/admin` dashboard with Pause, Resume, Cancel, and 1-click rollback
@@ -42,4 +98,6 @@ Initial release.
 - IP allowlist (`shadowForceIPs`) for forcing specific IPs to shadow
 - Session sticky cookies (`shadow-bucket`) with 24-hour TTL
 
-See [GitHub releases](https://github.com/mus-inn/shadow-canary/releases) for updates.
+---
+
+For per-package detail and migration steps: [`@dotworld/shadow-canary-core` CHANGELOG](https://github.com/mus-inn/shadow-canary/blob/master/packages/core/CHANGELOG.md), [`…-templates` CHANGELOG](https://github.com/mus-inn/shadow-canary/blob/master/packages/templates/CHANGELOG.md). For tagged release notes: [GitHub releases](https://github.com/mus-inn/shadow-canary/releases).
