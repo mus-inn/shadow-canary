@@ -57,6 +57,7 @@ export default defineConfig({
             { label: 'Admin API', link: '/reference/admin-api/' },
             { label: 'Dashboard', link: '/reference/dashboard/' },
             { label: 'SLO integration', link: '/reference/slo-integration/' },
+            { label: 'Runtime info (Sentry / PostHog)', link: '/reference/runtime-info/' },
           ],
         },
         {

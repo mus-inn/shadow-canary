@@ -13,3 +13,13 @@ export {
   SESSION_COOKIE,
   SESSION_MAX_AGE,
 } from './auth/session.js';
+export {
+  getBuildInfo,
+  getRuntimeBucket,
+  formatBuildInfoTag,
+  type BuildInfo,
+  type RuntimeInfo,
+  type ShadowCanarySlot,
+  type ShadowCanaryBucket,
+  type GetBuildInfoOptions,
+} from './runtime/info.js';

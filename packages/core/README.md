@@ -139,6 +139,29 @@ const deployments = await listDeployments();
 await promoteDeployment(deployments[0].uid);
 ```
 
+### Runtime info (slot, commit, bucket)
+
+Identify which deploy slot the running code lives in (shadow / prod-current /
+prod-previous / preview / dev) and stamp every Sentry error / PostHog event /
+log line with build metadata:
+
+```ts
+import { getBuildInfo, getRuntimeBucket } from '@dotworld/shadow-canary-core';
+
+// Sync, env-var-only — safe in Sentry.init / module-level.
+const info = getBuildInfo();
+// { slot: 'production-track', commitShaShort: 'abc1234', branch: 'production', ... }
+
+// Async, queries Edge Config — narrows production-track to prod-current vs prod-previous.
+const runtime = await getRuntimeBucket();
+// { bucket: 'prod-current', ... }
+```
+
+Critical for canary observability: when a release breaks, filtering errors by
+`bucket=prod-current` confirms whether the new deploy is the cause vs.
+something orthogonal. Full Sentry / PostHog integration recipes:
+**[docs/reference/runtime-info](https://mus-inn.github.io/shadow-canary/reference/runtime-info/)**.
+
 ### HMAC admin sessions (node only)
 
 ```ts

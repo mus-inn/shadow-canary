@@ -10,3 +10,13 @@ export {
   shadowCanaryMiddleware,
   type ShadowCanaryMiddlewareOptions,
 } from './middleware/compose.js';
+export {
+  getBuildInfo,
+  getRuntimeBucket,
+  formatBuildInfoTag,
+  type BuildInfo,
+  type RuntimeInfo,
+  type ShadowCanarySlot,
+  type ShadowCanaryBucket,
+  type GetBuildInfoOptions,
+} from './runtime/info.js';
