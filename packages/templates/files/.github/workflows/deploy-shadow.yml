@@ -43,6 +43,32 @@ jobs:
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "New shadow deploy: $DEPLOY_URL"
 
+      - name: Resolve current Vercel production deployment (bootstrap-only)
+        # Used solely to bootstrap `deploymentDomainProd` on the FIRST shadow
+        # deploy of a brand-new Edge Config — never to overwrite an existing
+        # value (deploy-prod.yml + /api/admin/rollback own that field after
+        # bootstrap). Reads the Vercel project's `targets.production` (the
+        # deployment currently aliased to the custom domain by `vercel
+        # promote`), which is the only honest source of "what's serving prod
+        # right now" we have access to from this workflow. Falls back to empty
+        # if the project has no prod deploy yet (greenfield) — leaving the
+        # field unset is strictly better than seeding it with the shadow URL
+        # (the historical hérésie this workflow used to commit).
+        id: prod
+        run: |
+          PROJECT=$(curl -sf \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
+            || echo '{}')
+          PROD_HOST=$(echo "$PROJECT" | jq -r '.targets.production.url // empty')
+          if [ -n "$PROD_HOST" ]; then
+            echo "url=https://$PROD_HOST" >> "$GITHUB_OUTPUT"
+            echo "Current Vercel prod target: https://$PROD_HOST"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "No targets.production on Vercel — deploymentDomainProd will stay unset until deploy-prod.yml runs."
+          fi
+
       - name: Merge new shadow URL into shadow config
         run: |
           CURRENT=$(curl -sf \
@@ -54,6 +80,7 @@ jobs:
 
           MERGED=$(echo "$CURRENT" | jq \
             --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
+            --arg prodUrl "${{ steps.prod.outputs.url }}" \
             '. as $cur
             | (
                 # Prepend the outgoing shadow URL to history iff it exists
@@ -70,8 +97,19 @@ jobs:
                   ($cur.shadowHistory // [])
                 end
               ) as $history
-            | . + {
-              deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
+            # Bootstrap-only patch for deploymentDomainProd: write the Vercel
+            # current-prod URL ONLY when the field is empty. Never overrides
+            # a value already set by deploy-prod.yml or the rollback admin
+            # action — that field is owned by the prod path, this workflow
+            # is read-only on it after first init.
+            | (
+                if ($cur.deploymentDomainProd // "") == "" and ($prodUrl | length) > 0 then
+                  {deploymentDomainProd: $prodUrl}
+                else
+                  {}
+                end
+              ) as $prodBootstrap
+            | . + $prodBootstrap + {
               shadowHistory: $history,
               # Deprecated: kept populated for back-compat with v0.4.x admin
               # UIs reading the old field. Remove in v0.5.
