@@ -18,7 +18,10 @@ console.log(`shadow-canary templates v${manifest.version} → ${dest}`);
 // their existing `proxy.ts`. Both files coexisting on v16 is technically
 // allowed but confusing (different runtimes: middleware=Edge, proxy=Node)
 // and wastes the lib's main entry point ergonomics.
-const NEXTJS16_PROXY_PATHS = ['proxy.ts', 'src/proxy.ts', 'proxy.js', 'src/proxy.js'];
+const NEXTJS16_PROXY_PATHS = [
+  'proxy.ts', 'proxy.tsx', 'proxy.js', 'proxy.mjs', 'proxy.cjs', 'proxy.mts',
+  'src/proxy.ts', 'src/proxy.tsx', 'src/proxy.js', 'src/proxy.mjs', 'src/proxy.cjs', 'src/proxy.mts',
+];
 const detectedProxy = NEXTJS16_PROXY_PATHS.find((p) => existsSync(join(dest, p)));
 
 let files = manifest.files;
@@ -29,6 +32,9 @@ if (detectedProxy) {
     console.log(`  detect  Next.js 16 ${detectedProxy} — skipping middleware.ts`);
     console.log(`          compose shadowCanaryProxy into your existing ${detectedProxy}:`);
     console.log(`          https://mus-inn.github.io/shadow-canary/install/migration-manual/#nextjs-16-proxyts`);
+    if (existsSync(join(dest, 'middleware.ts'))) {
+      console.log(`  warn    middleware.ts also exists — safe to delete (your ${detectedProxy} owns routing now)`);
+    }
   }
 }
 
