@@ -43,6 +43,60 @@ jobs:
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "New shadow deploy: $DEPLOY_URL"
 
+      - name: Resolve current Vercel production deployment (bootstrap-only)
+        # Used solely to bootstrap `deploymentDomainProd` on the FIRST shadow
+        # deploy of a brand-new Edge Config — never to overwrite an existing
+        # value (deploy-prod.yml + /api/admin/rollback own that field after
+        # bootstrap). Reads the Vercel project's `targets.production` (the
+        # deployment currently aliased to the custom domain by `vercel
+        # promote`), which is the only honest source of "what's serving prod
+        # right now" we have access to from this workflow. Falls back to
+        # empty when Vercel has no prod target yet (legitimate greenfield) —
+        # leaving the field unset is strictly better than seeding it with
+        # the shadow URL (the historical fallback this workflow used to
+        # commit). HTTP failure modes (auth, rate limit, outage) are
+        # surfaced as workflow annotations instead of being silently
+        # collapsed into the "no prod" branch.
+        id: prod
+        run: |
+          HTTP=$(curl -s -o /tmp/vercel-project.json -w '%{http_code}' \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
+            || echo '000')
+          case "$HTTP" in
+            200)
+              # `targets.production.url` is documented as a bare hostname
+              # (e.g. `myapp-abc123.vercel.app`). Strip any scheme defensively
+              # in case the API contract ever drifts — re-prepend a single
+              # `https://` below so we never write `https://https://...` to
+              # Edge Config.
+              PROD_HOST=$(jq -r '.targets.production.url // empty' /tmp/vercel-project.json \
+                | sed -E 's#^https?://##')
+              ;;
+            404)
+              # No prod target on this Vercel project — legitimate greenfield.
+              # Bootstrap defers until the first deploy-prod.yml run.
+              PROD_HOST=""
+              ;;
+            *)
+              # 000 = curl transport error (DNS, TLS, network); 401/403 =
+              # token expired or missing scope; 429 = rate limit; 5xx =
+              # Vercel outage; anything else = unexpected. None of these
+              # mean "no prod target" — surface them so a stale token
+              # doesn't silently delay bootstrap forever.
+              echo "::warning::Vercel project lookup failed (HTTP $HTTP) — deploymentDomainProd bootstrap skipped this run."
+              PROD_HOST=""
+              ;;
+          esac
+
+          if [ -n "$PROD_HOST" ]; then
+            echo "url=https://$PROD_HOST" >> "$GITHUB_OUTPUT"
+            echo "Current Vercel prod target: https://$PROD_HOST"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "No targets.production resolved — deploymentDomainProd will stay unset until deploy-prod.yml runs."
+          fi
+
       - name: Merge new shadow URL into shadow config
         run: |
           CURRENT=$(curl -sf \
@@ -54,6 +108,7 @@ jobs:
 
           MERGED=$(echo "$CURRENT" | jq \
             --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
+            --arg prodUrl "${{ steps.prod.outputs.url }}" \
             '. as $cur
             | (
                 # Prepend the outgoing shadow URL to history iff it exists
@@ -70,8 +125,19 @@ jobs:
                   ($cur.shadowHistory // [])
                 end
               ) as $history
-            | . + {
-              deploymentDomainProd: (.deploymentDomainProd // $shadowUrl),
+            # Bootstrap-only patch for deploymentDomainProd: write the Vercel
+            # current-prod URL ONLY when the field is empty. Never overrides
+            # a value already set by deploy-prod.yml or the rollback admin
+            # action — that field is owned by the prod path, this workflow
+            # is read-only on it after first init.
+            | (
+                if ($cur.deploymentDomainProd // "") == "" and ($prodUrl | length) > 0 then
+                  {deploymentDomainProd: $prodUrl}
+                else
+                  {}
+                end
+              ) as $prodBootstrap
+            | . + $prodBootstrap + {
               shadowHistory: $history,
               # Deprecated: kept populated for back-compat with v0.4.x admin
               # UIs reading the old field. Remove in v0.5.
