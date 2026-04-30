@@ -15,9 +15,9 @@ on:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
-# Shared concurrency group with deploy-prod.yml: serializes deploy + bump
-# on the same Edge Config key so the read-modify-write in patchShadowConfig
-# can't race.
+# Shared concurrency group with deploy-prod.yml + deploy-shadow.yml:
+# serializes deploy + bump on the same Edge Config key so the
+# read-modify-write cycle can't race.
 concurrency:
   group: shadow-canary-${{ github.repository }}
   cancel-in-progress: false
@@ -25,6 +25,13 @@ concurrency:
 jobs:
   ramp:
     runs-on: ubuntu-latest
+    # Force `shell: bash` so every `run:` step gets
+    # `bash --noprofile --norc -eo pipefail {0}` instead of the default
+    # `bash -e {0}` (no pipefail). See deploy-shadow.yml for the
+    # historical incident this defends against.
+    defaults:
+      run:
+        shell: bash
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -51,19 +58,47 @@ jobs:
       - name: Read current canary state from Edge Config
         id: state
         run: |
-          VALUE=$(curl -sf \
+          # Same defensive read pattern as deploy-shadow.yml /
+          # deploy-prod.yml — `curl -sf | jq` without HTTP code capture
+          # silently produces an empty / partial result on transient API
+          # failures. With pipefail (now active via job-level
+          # `shell: bash`) the pipe failure would propagate, but the cron
+          # runs 96×/day so even a 99.9% reliable API would fail this step
+          # several times per quarter; capturing the HTTP code is the
+          # right defense to avoid spurious skips and noisy ::error::
+          # cascades for benign transients.
+          EDGE_FILE="${RUNNER_TEMP}/edge-config-${GITHUB_RUN_ID}-state.json"
+          trap 'rm -f "$EDGE_FILE"' EXIT
+
+          HTTP=$(curl -s -o "$EDGE_FILE" -w '%{http_code}' \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}')
+            || echo '000')
+          case "$HTTP" in
+            200)
+              if ! jq -e . "$EDGE_FILE" >/dev/null 2>&1; then
+                echo "::error::Edge Config read returned 200 but body is not valid JSON — refusing to read state from a corrupted response."
+                exit 1
+              fi
+              VALUE=$(jq --arg key "$SHADOW_CANARY_KEY" \
+                '[.[] | select(.key == $key)] | .[0].value // {}' "$EDGE_FILE")
+              ;;
+            *)
+              echo "::error::Edge Config read failed (HTTP $HTTP) — refusing to read state from a failed response."
+              exit 1
+              ;;
+          esac
 
           PROD_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProd // empty')
           PREV_URL=$(echo "$VALUE" | jq -r '.deploymentDomainProdPrevious // empty')
           PCT=$(echo "$VALUE" | jq -r '.trafficProdCanaryPercent // 100')
           PAUSED=$(echo "$VALUE" | jq -r '.canaryPaused // false')
 
-          echo "value<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$VALUE" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "value<<EOF"
+            echo "$VALUE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "prod_url=$PROD_URL" >> "$GITHUB_OUTPUT"
           echo "prev_url=$PREV_URL" >> "$GITHUB_OUTPUT"
           echo "pct=$PCT" >> "$GITHUB_OUTPUT"
@@ -72,10 +107,11 @@ jobs:
 
       - name: Skip if no canary in progress or paused by operator
         id: gate
+        env:
+          PCT: ${{ steps.state.outputs.pct }}
+          PROD_URL: ${{ steps.state.outputs.prod_url }}
+          PAUSED: ${{ steps.state.outputs.paused }}
         run: |
-          PCT='${{ steps.state.outputs.pct }}'
-          PROD_URL='${{ steps.state.outputs.prod_url }}'
-          PAUSED='${{ steps.state.outputs.paused }}'
           if [ -z "$PROD_URL" ]; then
             echo "No deploymentDomainProd yet — nothing to canary. Exiting."
             echo "skip=1" >> "$GITHUB_OUTPUT"
@@ -96,15 +132,20 @@ jobs:
       - name: Run 2 SLO checks (30s apart) on new prod
         id: slo
         if: steps.gate.outputs.skip == '0'
+        env:
+          PROD_URL: ${{ steps.state.outputs.prod_url }}
         run: |
-          URL='${{ steps.state.outputs.prod_url }}/api/slo'
+          URL="${PROD_URL}/api/slo"
           case "$URL" in http*) ;; *) URL="https://$URL" ;; esac
+
+          SLO_BODY_FILE="${RUNNER_TEMP}/slo-body-${GITHUB_RUN_ID}.txt"
+          trap 'rm -f "$SLO_BODY_FILE"' EXIT
 
           OK=0
           LAST_BODY=""
           for i in 1 2; do
-            CODE=$(curl -s -o /tmp/slo_body.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
-            BODY=$(cat /tmp/slo_body.txt 2>/dev/null || true)
+            CODE=$(curl -s -o "$SLO_BODY_FILE" -w "%{http_code}" --max-time 10 "$URL" || echo "000")
+            BODY=$(cat "$SLO_BODY_FILE" 2>/dev/null || true)
             # Trim to 500 chars, strip newlines/CR for YAML-safe single-line output.
             # 500 gives enough room to show a full JSON payload or a truncated
             # stack trace without blowing the Edge Config 8 KB per-item cap
@@ -134,8 +175,9 @@ jobs:
       - name: Compute next percent (Europe/Paris time-gated cap)
         id: compute
         if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '1'
+        env:
+          CURRENT: ${{ steps.state.outputs.pct }}
         run: |
-          CURRENT='${{ steps.state.outputs.pct }}'
           HOUR=$(TZ=Europe/Paris date +%-H)
           if [ "$HOUR" -lt 12 ]; then CAP=20; else CAP=100; fi
           NEXT=$((CURRENT + STEP))
@@ -146,9 +188,10 @@ jobs:
 
       - name: Apply bump
         if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '1'
+        env:
+          NEXT: ${{ steps.compute.outputs.next }}
+          CURRENT_VALUE: ${{ steps.state.outputs.value }}
         run: |
-          NEXT='${{ steps.compute.outputs.next }}'
-          CURRENT_VALUE='${{ steps.state.outputs.value }}'
           # At 100%, keep deploymentDomainProdPrevious in place so in-flight
           # sessions assigned to 'prod-previous' can finish there. The key is
           # only rotated by the next deploy-prod run. canaryStartedAt cleared
@@ -170,16 +213,19 @@ jobs:
           steps.slo.outputs.ok == '1' &&
           steps.compute.outputs.next == '100' &&
           env.SLACK_WEBHOOK_URL != ''
+        env:
+          PROD_URL: ${{ steps.state.outputs.prod_url }}
         run: |
-          TEXT=":white_check_mark: Canary reached 100% on \`${{ steps.state.outputs.prod_url }}\` — new users go straight to new prod; in-flight sessions on previous finish there until next deploy."
+          TEXT=":white_check_mark: Canary reached 100% on \`${PROD_URL}\` — new users go straight to new prod; in-flight sessions on previous finish there until next deploy."
           curl -sS -X POST -H 'Content-Type: application/json' \
             -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
             "$SLACK_WEBHOOK_URL"
 
       - name: Rollback to 0% on SLO failure
         if: steps.gate.outputs.skip == '0' && steps.slo.outputs.ok == '0'
+        env:
+          CURRENT_VALUE: ${{ steps.state.outputs.value }}
         run: |
-          CURRENT_VALUE='${{ steps.state.outputs.value }}'
           # Pause too so the cron doesn't auto-recover on a transient SLO flake —
           # a human should look at Sentry and Resume via /admin if safe.
           MERGED=$(echo "$CURRENT_VALUE" | jq '. + {trafficProdCanaryPercent: 0, canaryPaused: true}')
@@ -194,9 +240,10 @@ jobs:
           steps.gate.outputs.skip == '0' &&
           steps.slo.outputs.ok == '0' &&
           env.SLACK_WEBHOOK_URL != ''
+        env:
+          PCT: ${{ steps.state.outputs.pct }}
+          PROD_URL: ${{ steps.state.outputs.prod_url }}
         run: |
-          PCT='${{ steps.state.outputs.pct }}'
-          PROD_URL='${{ steps.state.outputs.prod_url }}'
           TEXT=":rotating_light: Canary rolled back to 0% on \`$PROD_URL\` (was ${PCT}%). SLO failed — all prod traffic back on previous deploy. Check Sentry."
           curl -sS -X POST -H 'Content-Type: application/json' \
             -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
@@ -206,11 +253,16 @@ jobs:
         # Runs on both pass and fail paths (not on skip) so the admin UI has a
         # trail of recent checks to diagnose "why isn't the canary moving?".
         if: steps.gate.outputs.skip == '0'
+        env:
+          OK: ${{ steps.slo.outputs.ok }}
+          PCT_BEFORE: ${{ steps.state.outputs.pct }}
+          NEXT_PCT: ${{ steps.compute.outputs.next }}
+          CODE1: ${{ steps.slo.outputs.code1 }}
+          CODE2: ${{ steps.slo.outputs.code2 }}
+          BODY: ${{ steps.slo.outputs.body_excerpt }}
         run: |
-          OK='${{ steps.slo.outputs.ok }}'
-          PCT_BEFORE='${{ steps.state.outputs.pct }}'
           if [ "$OK" = "1" ]; then
-            PCT_AFTER='${{ steps.compute.outputs.next }}'
+            PCT_AFTER="$NEXT_PCT"
           else
             PCT_AFTER="0"
           fi
@@ -219,17 +271,39 @@ jobs:
           # Re-read the current Edge Config value because the bump/rollback
           # step just mutated it — we want to merge sloChecks on top of the
           # fresh post-bump state, not overwrite the pct the previous step set.
-          FRESH=$(curl -sf \
+          # Same HTTP-capture pattern as the initial state read: a transient
+          # API failure here would otherwise have FRESH collapse to {} and
+          # the upsert would clobber every key except sloChecks. Worse than
+          # the deploy-* clobber path because this runs 96×/day on the cron.
+          EDGE_FILE="${RUNNER_TEMP}/edge-config-${GITHUB_RUN_ID}-fresh.json"
+          trap 'rm -f "$EDGE_FILE"' EXIT
+
+          HTTP=$(curl -s -o "$EDGE_FILE" -w '%{http_code}' \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}')
+            || echo '000')
+          case "$HTTP" in
+            200)
+              if ! jq -e . "$EDGE_FILE" >/dev/null 2>&1; then
+                echo "::error::Edge Config re-read returned 200 but body is not valid JSON — refusing to write sloChecks against a corrupted response."
+                exit 1
+              fi
+              FRESH=$(jq --arg key "$SHADOW_CANARY_KEY" \
+                '[.[] | select(.key == $key)] | .[0].value // {}' "$EDGE_FILE")
+              if [ -z "$FRESH" ] || [ "$FRESH" = "null" ]; then FRESH='{}'; fi
+              ;;
+            *)
+              echo "::error::Edge Config re-read failed (HTTP $HTTP) — refusing to write sloChecks against empty state to avoid clobbering deploymentDomainProd / deploymentDomainProdPrevious / trafficProdCanaryPercent."
+              exit 1
+              ;;
+          esac
 
           ENTRY=$(jq -n \
             --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --argjson ok "$OK_BOOL" \
-            --argjson code1 "${{ steps.slo.outputs.code1 }}" \
-            --argjson code2 "${{ steps.slo.outputs.code2 }}" \
-            --arg body "${{ steps.slo.outputs.body_excerpt }}" \
+            --argjson code1 "$CODE1" \
+            --argjson code2 "$CODE2" \
+            --arg body "$BODY" \
             --argjson pctBefore "$PCT_BEFORE" \
             --argjson pctAfter "$PCT_AFTER" \
             '{ts: $ts, ok: $ok, codes: [$code1, $code2], bodyExcerpt: $body, pctBefore: $pctBefore, pctAfter: $pctAfter}')
@@ -241,3 +315,19 @@ jobs:
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"
+
+      - name: Notify Slack on workflow failure
+        # ::error:: is invisible outside the GitHub Actions UI. Without
+        # this step, a transient API outage during a cron tick would
+        # silently fail and nobody would notice — the next tick 15 min
+        # later would just succeed if the API recovered.
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TEXT=":rotating_light: Workflow \`${WORKFLOW}\` failed on \`${REPO}\` — see https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"

@@ -26,6 +26,8 @@ import { Aside } from '@astrojs/starlight/components';
 | Edge Config reads fail at runtime | `EDGE_CONFIG` connection string not injected | Vercel injects this automatically when the store is linked. Re-link the store to the project and redeploy |
 | Middleware runs on shadow/previous deploy and routes again | `x-shadow-routed` header not set or stripped | Verify `rewriteTo` sets `x-shadow-routed: 1`. Check that no other middleware or proxy strips it before reaching the target deploy |
 | Rollback button in admin returns 500 | `VERCEL_API_TOKEN` not set or expired | Add/refresh `VERCEL_API_TOKEN` in Vercel env vars |
+| Workflow fails with `::error::Edge Config read failed (HTTP NNN)` | Vercel API transient — `401`/`403` token expired or wrong scope, `429` rate limit, `5xx` Vercel outage, `000` runner network error | **Fail-safe, not a bug.** This step refuses to write Edge Config when the read can't be trusted, preventing the historical state-clobber bug. Check [Vercel status](https://www.vercel-status.com/), wait for recovery, then re-trigger the workflow from the Actions UI. Edge Config was *not* mutated — the step exits before the PATCH. For `401`/`403`, regenerate `VERCEL_TOKEN` with team scope. For `404` on the project lookup specifically, verify `VERCEL_PROJECT_ID` matches the project the token can access |
+| Workflow fails with `::error:: … body is not valid JSON` | Vercel returned `200 OK` with a non-JSON body (CDN error page during an incident) | Same recovery as the HTTP-NNN error above — re-trigger once the API is healthy. The fail-fast is intentional: a malformed 200 response would otherwise be parsed as `{}` and clobber state |
 
 ## Canary stuck: detailed checklist
 
