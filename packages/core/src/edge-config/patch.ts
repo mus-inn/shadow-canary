@@ -1,7 +1,7 @@
 // Server-only helpers for talking to Vercel REST API and patching Edge Config.
 // Never import from client components or edge runtime.
 import type { ShadowConfig } from '../types.js';
-import { resolveConfigKey } from './read.js';
+import { getShadowConfig, resolveConfigKey } from './read.js';
 
 const VERCEL_API_TOKEN = process.env['VERCEL_API_TOKEN'];
 const VERCEL_ORG_ID = process.env['VERCEL_ORG_ID'];
@@ -37,10 +37,22 @@ async function vercelFetch(
 }
 
 /**
- * Read the ShadowConfig payload from Edge Config. The key is derived from
- * `VERCEL_GIT_REPO_SLUG` as `shadow-<slug>-canary` — see `resolveConfigKey`.
+ * Read the ShadowConfig payload via the Vercel **management API** (instead of
+ * the CDN-cached `@vercel/edge-config` SDK). Internal — only `patchShadowConfig`
+ * uses this for its read-modify-write cycle, where reading through the SAME
+ * authoritative path as the write avoids a stale-cache race against the
+ * 60-second SDK cache.
+ *
+ * The public API for "read ShadowConfig" is `readShadowConfig`, which is an
+ * alias of `getShadowConfig` from `./read.ts` (CDN-backed, ~10 000+ reads/sec,
+ * fast for hot paths like `/api/slo` polling, dashboards, and middleware).
+ *
+ * The management API used here is rate-limited to **20 requests per 60 seconds
+ * per token** (Vercel `api-edge-config-items-get` quota). Any non-write caller
+ * landing here in volume will saturate that limit and start receiving 429s,
+ * which is why this function is no longer exported.
  */
-export async function readShadowConfig(): Promise<ShadowConfig | null> {
+async function readShadowConfigViaApi(): Promise<ShadowConfig | null> {
   const err = checkEnv();
   if (err) throw new Error(err);
   const key = resolveConfigKey();
@@ -51,6 +63,21 @@ export async function readShadowConfig(): Promise<ShadowConfig | null> {
   const hit = items.find((i) => i.key === key);
   return (hit?.value as ShadowConfig) ?? null;
 }
+
+/**
+ * Read the ShadowConfig payload from Edge Config via the CDN-cached SDK.
+ *
+ * Re-exported here for backward compatibility — pre-v0.7.x this name pointed
+ * at the management-API-backed implementation in this file, which had a
+ * 20 req / 60 s rate limit per token that saturated quickly under realistic
+ * load (Better Stack `/api/slo` monitor + canary-ramp cron + admin dashboard
+ * + read-modify-write cycles all sharing the same token quota).
+ *
+ * Now delegates to `getShadowConfig` (`./read.ts`), which uses the
+ * `@vercel/edge-config` SDK + 60-second in-process cache. ~10 000+ reads/sec,
+ * ~30-80 ms latency, no shared rate limit.
+ */
+export const readShadowConfig = getShadowConfig;
 
 /**
  * Merge-patch the ShadowConfig at the derived key. `opts.unset` deletes those
@@ -64,7 +91,11 @@ export async function patchShadowConfig(
   if (err) throw new Error(err);
   const key = resolveConfigKey();
 
-  const current = (await readShadowConfig()) ?? {};
+  // Use the management API read path (NOT the CDN-cached SDK) to avoid
+  // racing against the SDK's 60s cache: a write here followed by another
+  // patchShadowConfig within the cache window would otherwise see stale
+  // state and merge against an out-of-date base.
+  const current = (await readShadowConfigViaApi()) ?? {};
   const merged: ShadowConfig = { ...current, ...patch };
   if (opts?.unset) {
     for (const k of opts.unset) delete merged[k];
