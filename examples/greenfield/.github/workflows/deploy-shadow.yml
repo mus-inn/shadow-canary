@@ -5,14 +5,34 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Serialized with deploy-prod.yml and canary-ramp.yml on the same Edge
+# Config key. The read-modify-write cycle on Edge Config is not atomic:
+# without this group a master push that lands during a canary-ramp tick
+# could read the pre-bump state, then PATCH back over the cron's bump,
+# silently undoing the ramp. The cron is the most frequent writer, push
+# events the rarest — keeping all three in one group costs nothing and
+# closes the last race in the read-modify-write story.
+concurrency:
+  group: shadow-canary-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Force `shell: bash` so every `run:` step gets
+    # `bash --noprofile --norc -eo pipefail {0}` instead of the default
+    # `bash -e {0}` (no pipefail). Without pipefail, `cmd1 | cmd2`
+    # silently swallows cmd1 errors as long as cmd2 succeeds — exactly
+    # how the historical `curl -sf | jq` clobber bug stayed invisible.
+    defaults:
+      run:
+        shell: bash
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       EDGE_CONFIG_ID: ${{ secrets.VERCEL_EDGE_CONFIG_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       # Key is deterministic: derived from the repo slug on both sides.
       # Middleware reads VERCEL_GIT_REPO_SLUG (auto-injected by Vercel);
       # this workflow uses github.event.repository.name. Same value, same
@@ -39,51 +59,63 @@ jobs:
                               resolve to this deploy)
         id: deploy
         run: |
-          DEPLOY_URL=$(vercel deploy --prod --skip-domain --token=$VERCEL_TOKEN)
+          # `vercel deploy` reads VERCEL_TOKEN from env (set at job level).
+          # Passing it as `--token=$VERCEL_TOKEN` would expose the value
+          # in /proc/<pid>/cmdline to any sibling process on the runner
+          # and surface it in error traces from the Vercel CLI itself.
+          DEPLOY_URL=$(vercel deploy --prod --skip-domain)
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "New shadow deploy: $DEPLOY_URL"
 
       - name: Resolve current Vercel production deployment (bootstrap-only)
-        # Used solely to bootstrap `deploymentDomainProd` on the FIRST shadow
-        # deploy of a brand-new Edge Config — never to overwrite an existing
-        # value (deploy-prod.yml + /api/admin/rollback own that field after
-        # bootstrap). Reads the Vercel project's `targets.production` (the
-        # deployment currently aliased to the custom domain by `vercel
-        # promote`), which is the only honest source of "what's serving prod
-        # right now" we have access to from this workflow. Falls back to
-        # empty when Vercel has no prod target yet (legitimate greenfield) —
-        # leaving the field unset is strictly better than seeding it with
-        # the shadow URL (the historical fallback this workflow used to
-        # commit). HTTP failure modes (auth, rate limit, outage) are
-        # surfaced as workflow annotations instead of being silently
-        # collapsed into the "no prod" branch.
+        # Used solely to bootstrap `deploymentDomainProd` on the FIRST
+        # shadow deploy of a brand-new Edge Config — never to overwrite
+        # an existing value (deploy-prod.yml + /api/admin/rollback own
+        # that field after bootstrap). Reads the project's
+        # `targets.production.url` (the deploy currently aliased to the
+        # custom domain by `vercel promote`), the only honest source of
+        # "what's serving prod right now" available to this workflow.
+        # When 200 returns with `targets.production = null` the project
+        # is greenfield (no prod yet) and bootstrap defers until the
+        # first deploy-prod run. Any HTTP failure (auth, rate limit,
+        # outage, project-not-found) is surfaced as a `::warning::`
+        # annotation rather than collapsed into the "no prod" branch —
+        # a 404 here typically means the project ID or token scope is
+        # wrong and should be investigated, not silently ignored.
         id: prod
         run: |
-          HTTP=$(curl -s -o /tmp/vercel-project.json -w '%{http_code}' \
+          PROJECT_FILE="${RUNNER_TEMP}/vercel-project-${GITHUB_RUN_ID}.json"
+          trap 'rm -f "$PROJECT_FILE"' EXIT
+
+          HTTP=$(curl -s -o "$PROJECT_FILE" -w '%{http_code}' \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
             || echo '000')
           case "$HTTP" in
             200)
+              # Validate the body parses as JSON before extracting fields.
+              # Vercel has historically returned 200 with HTML error pages
+              # during CDN incidents — defending against that prevents a
+              # corrupted response from reaching the merge step below.
+              if ! jq -e . "$PROJECT_FILE" >/dev/null 2>&1; then
+                echo "::error::Vercel project lookup returned 200 but body is not valid JSON — refusing to bootstrap from a corrupted response."
+                exit 1
+              fi
               # `targets.production.url` is documented as a bare hostname
-              # (e.g. `myapp-abc123.vercel.app`). Strip any scheme defensively
-              # in case the API contract ever drifts — re-prepend a single
-              # `https://` below so we never write `https://https://...` to
-              # Edge Config.
-              PROD_HOST=$(jq -r '.targets.production.url // empty' /tmp/vercel-project.json \
+              # (e.g. `myapp-abc123.vercel.app`). Strip any scheme
+              # defensively in case the API contract ever drifts so we
+              # never write `https://https://...` to Edge Config.
+              PROD_HOST=$(jq -r '.targets.production.url // empty' "$PROJECT_FILE" \
                 | sed -E 's#^https?://##')
-              ;;
-            404)
-              # No prod target on this Vercel project — legitimate greenfield.
-              # Bootstrap defers until the first deploy-prod.yml run.
-              PROD_HOST=""
               ;;
             *)
               # 000 = curl transport error (DNS, TLS, network); 401/403 =
-              # token expired or missing scope; 429 = rate limit; 5xx =
-              # Vercel outage; anything else = unexpected. None of these
-              # mean "no prod target" — surface them so a stale token
-              # doesn't silently delay bootstrap forever.
+              # token expired or missing scope; 404 = project not found
+              # (wrong VERCEL_PROJECT_ID, or token scoped to a different
+              # team); 429 = rate limit; 5xx = Vercel outage. None of
+              # these mean "no prod target" — surface them so a stale
+              # token or wrong project ID doesn't silently delay
+              # bootstrap forever.
               echo "::warning::Vercel project lookup failed (HTTP $HTTP) — deploymentDomainProd bootstrap skipped this run."
               PROD_HOST=""
               ;;
@@ -98,17 +130,60 @@ jobs:
           fi
 
       - name: Merge new shadow URL into shadow config
+        env:
+          # Move outputs into env so jq receives them via "$VAR" instead of
+          # GitHub-Actions templating interpolating them into the heredoc.
+          # If a malformed Vercel URL ever contained a quote, backtick, or
+          # `$(...)`, direct templating would let it escape the surrounding
+          # bash quoting and execute on the runner; routing through env
+          # never re-evaluates the value.
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          PROD_URL: ${{ steps.prod.outputs.url }}
         run: |
-          CURRENT=$(curl -sf \
+          # Read current Edge Config item with explicit HTTP code capture.
+          # The previous pattern `curl -sf … | jq … || echo '{}'` collapsed
+          # every transient API failure (401/403/429/5xx/network blip) into
+          # a silent "treat as empty". GitHub Actions' default `bash -e {0}`
+          # (no pipefail) hid the curl failure inside the pipe — set -e saw
+          # only jq's exit code, which the `|| echo '{}'` then caught. The
+          # merge that followed upserted a state built entirely from the
+          # `// fallback` defaults, clobbering every existing key
+          # (deploymentDomainProd, deploymentDomainProdPrevious,
+          # trafficProdCanaryPercent, …) on a single hiccup of the API.
+          # Two layers fix this:
+          #   1. `defaults.run.shell: bash` at the job level activates
+          #      pipefail — a future hand-rolled pipe failure won't be
+          #      invisible.
+          #   2. This step captures the HTTP code, treats 200 + valid JSON
+          #      as the only legal path, and aborts loudly otherwise — far
+          #      better to fail the workflow than to silently rewrite Edge
+          #      Config with defaults.
+          EDGE_FILE="${RUNNER_TEMP}/edge-config-${GITHUB_RUN_ID}.json"
+          trap 'rm -f "$EDGE_FILE"' EXIT
+
+          HTTP=$(curl -s -o "$EDGE_FILE" -w '%{http_code}' \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}' \
-            || echo '{}')
-          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+            || echo '000')
+          case "$HTTP" in
+            200)
+              if ! jq -e . "$EDGE_FILE" >/dev/null 2>&1; then
+                echo "::error::Edge Config read returned 200 but body is not valid JSON — refusing to merge against a corrupted response."
+                exit 1
+              fi
+              CURRENT=$(jq --arg key "$SHADOW_CANARY_KEY" \
+                '[.[] | select(.key == $key)] | .[0].value // {}' "$EDGE_FILE")
+              if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+              ;;
+            *)
+              echo "::error::Edge Config read failed (HTTP $HTTP) — refusing to merge against empty state to avoid clobbering deploymentDomainProd / deploymentDomainProdPrevious / trafficProdCanaryPercent with defaults."
+              exit 1
+              ;;
+          esac
 
           MERGED=$(echo "$CURRENT" | jq \
-            --arg shadowUrl "${{ steps.deploy.outputs.url }}" \
-            --arg prodUrl "${{ steps.prod.outputs.url }}" \
+            --arg shadowUrl "$DEPLOY_URL" \
+            --arg prodUrl "$PROD_URL" \
             '. as $cur
             | (
                 # Prepend the outgoing shadow URL to history iff it exists
@@ -144,8 +219,16 @@ jobs:
               deploymentDomainShadowPrevious: ($history[0] // null),
               deploymentDomainShadow: $shadowUrl,
               trafficShadowPercent: (.trafficShadowPercent // 1),
-              trafficProdCanaryPercent: (.trafficProdCanaryPercent // 100),
               shadowForceIPs: (.shadowForceIPs // [])
+              # NOTE: trafficProdCanaryPercent intentionally NOT defaulted
+              # here. That field is owned by deploy-prod.yml +
+              # canary-ramp.yml + /api/admin/* — deploy-shadow.yml is
+              # read-only on the prod ramp state. The old code had
+              # `trafficProdCanaryPercent: (.trafficProdCanaryPercent // 100)`
+              # which silently re-set the field to 100 if it was ever
+              # absent (e.g. after an admin-side `unset`), defeating
+              # operator intent and contributing to the same class of
+              # silent state-corruption this PR is fixing.
             }')
 
           curl -sS -X PATCH \
@@ -153,3 +236,19 @@ jobs:
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --argjson v "$MERGED" --arg key "$SHADOW_CANARY_KEY" '{items:[{operation:"upsert",key:$key,value:$v}]}')"
+
+      - name: Notify Slack on workflow failure
+        # ::error:: annotations are visible in the GitHub Actions UI but
+        # invisible to operators watching Slack. Without this step a
+        # transient Vercel API outage would silently fail the deploy and
+        # nobody would notice until the next manual UI check.
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TEXT=":rotating_light: Workflow \`${WORKFLOW}\` failed on \`${REPO}\` — see https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"

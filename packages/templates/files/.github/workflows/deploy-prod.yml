@@ -21,8 +21,8 @@ on:
         type: boolean
         default: false
 
-# Serialize with canary-ramp on the same repo so a deploy + bump can't race
-# on the same Edge Config key (read-modify-write).
+# Serialize with deploy-shadow.yml and canary-ramp.yml on the same Edge
+# Config key: deploy + bump must not race on the read-modify-write cycle.
 concurrency:
   group: shadow-canary-${{ github.repository }}
   cancel-in-progress: false
@@ -30,6 +30,13 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Force `shell: bash` so every `run:` step gets
+    # `bash --noprofile --norc -eo pipefail {0}` instead of the default
+    # `bash -e {0}` (no pipefail). See deploy-shadow.yml for the
+    # incident this defends against.
+    defaults:
+      run:
+        shell: bash
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -62,30 +69,68 @@ jobs:
                                   Protection injects ?dpl=<id> on static assets)
         id: deploy
         run: |
-          DEPLOY_URL=$(vercel deploy --prod --skip-domain --token=$VERCEL_TOKEN)
+          # `vercel deploy` reads VERCEL_TOKEN from env; passing
+          # --token=$VERCEL_TOKEN would expose it via /proc/<pid>/cmdline.
+          DEPLOY_URL=$(vercel deploy --prod --skip-domain)
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "New prod deploy: $DEPLOY_URL"
 
-      - name: Promote new deploy to custom domain
-        run: |
-          vercel promote ${{ steps.deploy.outputs.url }} --token=$VERCEL_TOKEN --scope=$VERCEL_ORG_ID
-
       - name: Update Edge Config (canary ramp or direct promote)
+        # Edge Config is updated BEFORE `vercel promote` (next step) on
+        # purpose: if Edge Config write fails (transient API error), we
+        # exit before touching the custom-domain alias, leaving the
+        # previous prod deploy serving traffic and Edge Config consistent
+        # with what's actually aliased. Re-running the workflow then
+        # creates a fresh Vercel deploy and retries the whole sequence
+        # idempotently. The previous order (promote then PATCH) could
+        # leave the custom domain pointing at a deploy not referenced in
+        # Edge Config when the PATCH failed — visible only as a stale
+        # admin UI, not a paged outage.
         id: edge
+        env:
+          # Move the deploy URL out of the GitHub-Actions templating layer
+          # into a real env var so jq receives it via "$NEW_URL" instead
+          # of having ${{ ... }} interpolated into the heredoc — defends
+          # against any malformed Vercel URL ever escaping the bash
+          # quoting and executing on the runner.
+          NEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          CURRENT=$(curl -sf \
+          # Same defensive read as deploy-shadow.yml — `curl -sf … | jq …
+          # || echo '{}'` swallowed transient Vercel API failures and let
+          # the subsequent merge clobber every existing key with `// fallback`
+          # defaults (e.g. trafficProdCanaryPercent reset to 100 mid-canary,
+          # deploymentDomainProdPrevious dropped, …). HTTP code capture +
+          # case + hard exit on non-200 means a flaky API blocks the deploy
+          # instead of corrupting Edge Config silently.
+          EDGE_FILE="${RUNNER_TEMP}/edge-config-${GITHUB_RUN_ID}.json"
+          trap 'rm -f "$EDGE_FILE"' EXIT
+
+          HTTP=$(curl -s -o "$EDGE_FILE" -w '%{http_code}' \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v1/edge-config/$EDGE_CONFIG_ID/items?teamId=$VERCEL_ORG_ID" \
-            | jq --arg key "$SHADOW_CANARY_KEY" '[.[] | select(.key == $key)] | .[0].value // {}' \
-            || echo '{}')
-          if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+            || echo '000')
+          case "$HTTP" in
+            200)
+              if ! jq -e . "$EDGE_FILE" >/dev/null 2>&1; then
+                echo "::error::Edge Config read returned 200 but body is not valid JSON — refusing to merge against a corrupted response."
+                exit 1
+              fi
+              CURRENT=$(jq --arg key "$SHADOW_CANARY_KEY" \
+                '[.[] | select(.key == $key)] | .[0].value // {}' "$EDGE_FILE")
+              if [ -z "$CURRENT" ] || [ "$CURRENT" = "null" ]; then CURRENT='{}'; fi
+              ;;
+            *)
+              echo "::error::Edge Config read failed (HTTP $HTTP) — refusing to merge against empty state to avoid clobbering deploymentDomainProd / deploymentDomainProdPrevious / trafficProdCanaryPercent with defaults."
+              exit 1
+              ;;
+          esac
 
           if [ "$SKIP_CANARY" = "true" ]; then
             # Operator-forced promotion. Goes straight to 100% — no previous
             # kept (no sticky tail), no startedAt, canary not paused.
             MODE="direct"
             MERGED=$(echo "$CURRENT" | jq \
-              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              --arg newUrl "$NEW_URL" \
               '. + {
                 deploymentDomainProd: $newUrl,
                 deploymentDomainShadow: (.deploymentDomainShadow // $newUrl),
@@ -100,7 +145,7 @@ jobs:
             # canary is in-flight without restarting from 0%.
             MODE="keep"
             MERGED=$(echo "$CURRENT" | jq \
-              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              --arg newUrl "$NEW_URL" \
               '. + {
                 deploymentDomainProd: $newUrl,
                 deploymentDomainShadow: (.deploymentDomainShadow // $newUrl),
@@ -113,7 +158,7 @@ jobs:
             # fallback during the ramp.
             MODE="canary"
             MERGED=$(echo "$CURRENT" | jq \
-              --arg newUrl "${{ steps.deploy.outputs.url }}" \
+              --arg newUrl "$NEW_URL" \
               --arg startedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               '
               (if (.deploymentDomainProd // "") == "" then
@@ -139,20 +184,55 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "pct=$(echo "$MERGED" | jq -r '.trafficProdCanaryPercent')" >> "$GITHUB_OUTPUT"
 
+      - name: Promote new deploy to custom domain
+        # Runs only after Edge Config has been updated successfully.
+        # Order matters: if this step fails, Edge Config still references
+        # this deploy URL but the alias never moved — the previous prod
+        # deploy keeps serving traffic until the next workflow run. That's
+        # a recoverable state (re-run the workflow). The reverse order
+        # (the historical layout) could leave the alias pointing at a
+        # deploy not referenced in Edge Config if PATCH failed afterward,
+        # producing inconsistencies the admin UI couldn't show.
+        env:
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # `vercel promote` reads VERCEL_TOKEN from env; passing
+          # --token=$VERCEL_TOKEN would expose it via /proc/<pid>/cmdline.
+          # The URL is interpolated through env to avoid GitHub-Actions
+          # templating splicing it directly into the bash command.
+          vercel promote "$NEW_URL" --scope="$VERCEL_ORG_ID"
+
       - name: Notify Slack
         if: env.SLACK_WEBHOOK_URL != ''
+        env:
+          MODE: ${{ steps.edge.outputs.mode }}
+          PCT: ${{ steps.edge.outputs.pct }}
+          NEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          MODE='${{ steps.edge.outputs.mode }}'
-          PCT='${{ steps.edge.outputs.pct }}'
           if [ "$MODE" = "direct" ]; then
-            TEXT=":rocket: Direct promote on \`${{ steps.deploy.outputs.url }}\` — \`[skip-canary]\` marker, 100% immediately, no ramp."
+            TEXT=":rocket: Direct promote on \`${NEW_URL}\` — \`[skip-canary]\` marker, 100% immediately, no ramp."
           elif [ "$MODE" = "keep" ]; then
-            TEXT=":arrows_counterclockwise: Canary fix-in-place on \`${{ steps.deploy.outputs.url }}\` — \`[keep-canary]\` marker, ramp resumes at ${PCT}%."
+            TEXT=":arrows_counterclockwise: Canary fix-in-place on \`${NEW_URL}\` — \`[keep-canary]\` marker, ramp resumes at ${PCT}%."
           elif [ "$PCT" = "100" ]; then
-            TEXT=":rocket: Bootstrap production deploy \`${{ steps.deploy.outputs.url }}\` — no previous prod, skipped canary (100%)."
+            TEXT=":rocket: Bootstrap production deploy \`${NEW_URL}\` — no previous prod, skipped canary (100%)."
           else
-            TEXT=":traffic_light: Canary started on \`${{ steps.deploy.outputs.url }}\` — 0%, ramping via cron every 15 min (Europe/Paris: cap 20% until 12:00, then up to 100%)."
+            TEXT=":traffic_light: Canary started on \`${NEW_URL}\` — 0%, ramping via cron every 15 min (Europe/Paris: cap 20% until 12:00, then up to 100%)."
           fi
+          curl -sS -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Notify Slack on workflow failure
+        # ::error:: is invisible outside the GitHub Actions UI. Without
+        # this step a transient API outage during Edge Config write (or a
+        # `vercel promote` failure after) would silently fail the deploy.
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          TEXT=":rotating_light: Workflow \`${WORKFLOW}\` failed on \`${REPO}\` — see https://github.com/${REPO}/actions/runs/${RUN_ID}"
           curl -sS -X POST -H 'Content-Type: application/json' \
             -d "$(jq -n --arg t "$TEXT" '{text: $t}')" \
             "$SLACK_WEBHOOK_URL"
