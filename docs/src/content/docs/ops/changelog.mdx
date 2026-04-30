@@ -5,6 +5,31 @@ description: Release history for shadow-canary. Newest first.
 
 The three packages (`@dotworld/shadow-canary-core`, `…-templates`, `…-skill`) version together via Changesets — bumping any of them bumps all three to the same version. Each entry below points at what changed at the user level; the per-package CHANGELOGs on GitHub have the granular per-package detail.
 
+## v0.7.0
+
+**New: Next.js 16 `proxy.ts` support via `shadowCanaryProxy` alias.** Next.js 16 (Oct 2025) renamed the file convention from `middleware.ts` → `proxy.ts` and the exported function from `middleware()` → `proxy()`. The wire-level API (`NextRequest`, `NextResponse`, `config.matcher`) is unchanged in v16, so `shadowCanaryMiddleware` already worked — but importing a function named `Middleware` into a file named `proxy.ts` reads awkwardly.
+
+Two ergonomic exports added, both in the main and edge entry points:
+
+- `shadowCanaryProxy` — strict alias of `shadowCanaryMiddleware` (same function reference, no re-implementation).
+- `ShadowCanaryProxyOptions` — alias of `ShadowCanaryMiddlewareOptions`.
+
+```ts
+// Next.js 16 proxy.ts (Node runtime)
+import { shadowCanaryProxy } from '@dotworld/shadow-canary-core';
+
+export async function proxy(req: NextRequest) {
+  const res = await shadowCanaryProxy(req);
+  return res ?? NextResponse.next();
+}
+```
+
+The middleware function is also now exported from the main entry point (it was previously only on `/edge`) so v16 `proxy.ts` files can import without the subpath. v15 setups and v16 Edge-runtime `middleware.ts` keep working unchanged — both names point at the same function.
+
+Note: `proxy.ts` runs on Node.js runtime only. `middleware.ts` is the only path for Edge runtime on v16 (deprecated, no removal date announced). Vercel ships a codemod for the file convention migration: `npx @next/codemod@canary middleware-to-proxy .`
+
+Full migration recipe: **[Manual migration — Next.js 16: `proxy.ts`](/shadow-canary/install/migration-manual/#nextjs-16-proxyts)**.
+
 ## v0.6.0
 
 **New: runtime info helper for Sentry / PostHog telemetry.** Two exports — `getBuildInfo()` (sync, env vars only) and `getRuntimeBucket()` (async, queries Edge Config) — return which deploy slot the running code lives in plus commit / branch / region metadata. The `bucket` field disambiguates `prod-current` vs `prod-previous` so canary regressions can be filtered in Sentry / PostHog by the bucket actually serving the broken request, instead of seeing a blended "production" environment.
