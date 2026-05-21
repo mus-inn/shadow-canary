@@ -24,6 +24,8 @@
     "app/admin/utils/time.ts",
     "app/admin/utils/timing.ts",
     "app/admin/utils/traffic.ts",
+    "app/admin/api/admin-client.ts",
+    "app/admin/api/errors.ts",
     "app/api/slo/route.ts",
     "app/api/admin/state/route.ts",
     "app/api/admin/deployments/route.ts",

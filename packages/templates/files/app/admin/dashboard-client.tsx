@@ -23,6 +23,7 @@ import { parisHour, phaseLabel } from './utils/time';
 import { stepSize } from './utils/step';
 import { computeTrafficShares } from './utils/traffic';
 import { computeTiming } from './utils/timing';
+import { adminApi } from './api/admin-client';
 
 export function AdminDashboard({ initial }: DashboardProps) {
   const [config, setConfig] = useState(initial.config);
@@ -39,32 +40,29 @@ export function AdminDashboard({ initial }: DashboardProps) {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [stateRes, deployRes, bucketRes, historyRes] = await Promise.all([
-        fetch('/api/admin/state', { cache: 'no-store' }),
-        fetch('/api/admin/deployments', { cache: 'no-store' }),
-        fetch('/api/admin/bucket-info', { cache: 'no-store' }),
-        fetch('/api/admin/shadow-history', { cache: 'no-store' }),
-      ]);
-      if (stateRes.ok) {
-        const { config: c } = await stateRes.json();
-        setConfig(c);
+      const [stateRes, deployRes, bucketRes, historyRes] =
+        await Promise.allSettled([
+          adminApi.fetchState(),
+          adminApi.fetchDeployments(),
+          adminApi.fetchBucketInfo(),
+          adminApi.fetchShadowHistory(),
+        ]);
+      if (stateRes.status === 'fulfilled') setConfig(stateRes.value.config);
+      if (deployRes.status === 'fulfilled')
+        setDeployments(deployRes.value.deployments);
+      if (bucketRes.status === 'fulfilled') setBucketInfo(bucketRes.value);
+      if (historyRes.status === 'fulfilled')
+        setShadowHistory(historyRes.value.entries ?? []);
+
+      const firstFailed = [stateRes, deployRes, bucketRes, historyRes].find(
+        (r) => r.status === 'rejected',
+      );
+      if (firstFailed?.status === 'rejected') {
+        const reason = firstFailed.reason;
+        setError(reason instanceof Error ? reason.message : 'refresh failed');
+      } else {
+        setError(null);
       }
-      if (deployRes.ok) {
-        const { deployments: d } = await deployRes.json();
-        setDeployments(d);
-      }
-      if (bucketRes.ok) {
-        setBucketInfo((await bucketRes.json()) as BucketInfoMap);
-      }
-      if (historyRes.ok) {
-        const { entries } = (await historyRes.json()) as {
-          entries: ShadowHistoryEntry[];
-        };
-        setShadowHistory(entries ?? []);
-      }
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -87,20 +85,12 @@ export function AdminDashboard({ initial }: DashboardProps) {
   }, []);
 
   const run = useCallback(
-    async (id: string, path: string, body?: object) => {
+    async (id: string, fn: () => Promise<void>) => {
       if (pendingAction) return;
       setActionError(null);
       setPendingAction(id);
       try {
-        const res = await fetch(path, {
-          method: 'POST',
-          headers: body ? { 'Content-Type': 'application/json' } : {},
-          body: body ? JSON.stringify(body) : undefined,
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `HTTP ${res.status}`);
-        }
+        await fn();
         await refresh();
         setModal(null);
       } catch (e) {
@@ -239,7 +229,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
                 status === 'complete-sticky' ||
                 !prevHost
               }
-              onClick={() => void run('pause', '/api/admin/canary/pause')}
+              onClick={() => void run('pause', adminApi.pause)}
             >
               Pause
             </ActionBtn>
@@ -247,7 +237,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
               id="resume"
               pendingId={pendingAction}
               disabled={isBusy || !config?.canaryPaused}
-              onClick={() => void run('resume', '/api/admin/canary/resume')}
+              onClick={() => void run('resume', adminApi.resume)}
             >
               Resume
             </ActionBtn>
@@ -288,9 +278,9 @@ export function AdminDashboard({ initial }: DashboardProps) {
                 !stepSize(stepInput)
               }
               onClick={() =>
-                void run('step-back', '/api/admin/canary/step-back', {
-                  step: stepSize(stepInput) ?? 4,
-                })
+                void run('step-back', () =>
+                  adminApi.stepBack(stepSize(stepInput) ?? STEP_DEFAULT),
+                )
               }
             >
               − {stepSize(stepInput) ?? 4}% (step back)
@@ -305,9 +295,9 @@ export function AdminDashboard({ initial }: DashboardProps) {
                 !stepSize(stepInput)
               }
               onClick={() =>
-                void run('step-forward', '/api/admin/canary/step-forward', {
-                  step: stepSize(stepInput) ?? 4,
-                })
+                void run('step-forward', () =>
+                  adminApi.stepForward(stepSize(stepInput) ?? STEP_DEFAULT),
+                )
               }
             >
               + {stepSize(stepInput) ?? 4}% (step forward)
@@ -336,7 +326,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
           pending={pendingAction === 'shadow-percent'}
           disabled={isBusy}
           onSave={(value) =>
-            void run('shadow-percent', '/api/admin/shadow-percent', { value })
+            void run('shadow-percent', () => adminApi.setShadowPercent(value))
           }
         />
 
@@ -426,7 +416,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         confirmLabel="Annuler le canary"
         pending={pendingAction === 'cancel'}
         onClose={() => setModal(null)}
-        onConfirm={() => void run('cancel', '/api/admin/canary/cancel')}
+        onConfirm={() => void run('cancel', adminApi.cancel)}
       />
 
       <ConfirmModal
@@ -450,7 +440,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         confirmLabel="Promote à 100%"
         pending={pendingAction === 'promote'}
         onClose={() => setModal(null)}
-        onConfirm={() => void run('promote', '/api/admin/canary/promote')}
+        onConfirm={() => void run('promote', adminApi.promote)}
       />
 
       <ConfirmModal
@@ -490,10 +480,12 @@ export function AdminDashboard({ initial }: DashboardProps) {
         onConfirm={() => {
           if (modal?.kind !== 'rollback') return;
           const d = modal.deploy;
-          void run(`rollback-${d.uid}`, '/api/admin/rollback', {
-            deploymentId: d.uid,
-            deploymentUrl: d.url.startsWith('http') ? d.url : `https://${d.url}`,
-          });
+          const deploymentUrl = d.url.startsWith('http')
+            ? d.url
+            : `https://${d.url}`;
+          void run(`rollback-${d.uid}`, () =>
+            adminApi.rollback(d.uid, deploymentUrl),
+          );
         }}
       />
 
@@ -539,10 +531,8 @@ export function AdminDashboard({ initial }: DashboardProps) {
         onClose={() => setModal(null)}
         onConfirm={() => {
           if (modal?.kind !== 'rollback-shadow') return;
-          void run(
-            `rollback-shadow-${modal.target.url}`,
-            '/api/admin/rollback-shadow',
-            { targetUrl: modal.target.url },
+          void run(`rollback-shadow-${modal.target.url}`, () =>
+            adminApi.rollbackShadow(modal.target.url),
           );
         }}
       />
