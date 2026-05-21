@@ -1,130 +1,30 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Deployment, ShadowConfig } from '@/lib/admin-vercel';
+import type { Deployment } from '@/lib/admin-vercel';
 import { BucketForcer } from './bucket-forcer';
 import { ConfirmModal } from './confirm-modal';
 import { PhasesDiagram } from './phases-diagram';
+import { REFRESH_INTERVAL_MS, STEP_DEFAULT, TICK_MS } from './constants/config';
+import { STATUS_LABEL } from './constants/labels';
+import type {
+  BucketInfo,
+  BucketInfoMap,
+  DashboardProps,
+  Segment,
+  ShadowHistoryEntry,
+  SloCheck,
+  Status,
+} from './types/dashboard';
+import type { ModalState } from './types/modal';
+import { deriveStatus, isCanaryLive, statusToPhase } from './utils/status';
+import { firstLine, formatDuration, prettyTimeAgo, shortHost } from './utils/format';
+import { parisHour, phaseLabel } from './utils/time';
+import { stepSize } from './utils/step';
+import { computeTrafficShares } from './utils/traffic';
+import { computeTiming } from './utils/timing';
 
-type Props = {
-  initial: {
-    config: ShadowConfig | null;
-    deployments: Deployment[];
-    error: string | null;
-  };
-};
-
-type BucketInfo = {
-  url: string;
-  sha: string | null;
-  ref: string | null;
-  message: string | null;
-  createdAt: number | null;
-  state: string | null;
-} | null;
-
-type BucketInfoMap = {
-  shadow: BucketInfo;
-  prodNew: BucketInfo;
-  prodPrevious: BucketInfo;
-};
-
-type ShadowHistoryEntry = {
-  url: string;
-  sha: string | null;
-  ref: string | null;
-  message: string | null;
-  createdAt: number | null;
-  state: string | null;
-};
-
-type Status =
-  | 'stable'
-  | 'starting'
-  | 'ramping'
-  | 'paused'
-  | 'complete-sticky'
-  | 'unknown';
-
-type ModalState =
-  | null
-  | { kind: 'cancel' }
-  | { kind: 'promote' }
-  | { kind: 'rollback'; deploy: Deployment }
-  | { kind: 'rollback-shadow'; target: ShadowHistoryEntry };
-
-function deriveStatus(cfg: ShadowConfig | null): Status {
-  if (!cfg) return 'unknown';
-  const pct = cfg.trafficProdCanaryPercent ?? 100;
-  const hasPrev = Boolean(cfg.deploymentDomainProdPrevious);
-  if (pct === 100 && !hasPrev) return 'stable';
-  if (pct === 100 && hasPrev) return 'complete-sticky';
-  if (cfg.canaryPaused) return 'paused';
-  if (pct === 0) return 'starting';
-  return 'ramping';
-}
-
-function statusToPhase(s: Status): 0 | 1 | 2 | 3 | 4 {
-  if (s === 'starting') return 2;
-  if (s === 'ramping' || s === 'paused') return 3;
-  if (s === 'complete-sticky') return 4;
-  return 0;
-}
-
-function shortHost(url?: string): string {
-  if (!url) return '—';
-  return url.replace(/^https?:\/\//, '').split('.')[0];
-}
-
-function stepSize(draft: string): number | null {
-  const n = Number(draft);
-  if (!Number.isFinite(n) || n < 1 || n > 50) return null;
-  return Math.round(n);
-}
-
-function prettyTimeAgo(ms: number, now: number | null): string {
-  if (now === null) return '—';
-  const diff = now - ms;
-  const m = Math.floor(diff / 60_000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 0) return '0s';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${(s % 60).toString().padStart(2, '0')}s`;
-  return `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, '0')}m`;
-}
-
-function nextCronFireMs(now: number): number {
-  const d = new Date(now);
-  d.setUTCSeconds(0, 0);
-  const nextMin = Math.ceil((d.getUTCMinutes() + 0.001) / 15) * 15;
-  d.setUTCMinutes(nextMin);
-  return d.getTime();
-}
-
-function parisHour(now: number): number {
-  const hourStr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Paris',
-    hour: '2-digit',
-    hour12: false,
-  }).format(new Date(now));
-  return parseInt(hourStr, 10);
-}
-
-function phaseLabel(hour: number): string {
-  if (hour < 12) return 'Matin · cap 20% jusqu’à 12:00 Paris';
-  return 'Après-midi · ramp jusqu’à 100% (step +4/15min)';
-}
-
-export function AdminDashboard({ initial }: Props) {
+export function AdminDashboard({ initial }: DashboardProps) {
   const [config, setConfig] = useState(initial.config);
   const [deployments, setDeployments] = useState(initial.deployments);
   const [bucketInfo, setBucketInfo] = useState<BucketInfoMap | null>(null);
@@ -134,7 +34,7 @@ export function AdminDashboard({ initial }: Props) {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
-  const [stepInput, setStepInput] = useState<string>('4');
+  const [stepInput, setStepInput] = useState<string>(String(STEP_DEFAULT));
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -171,7 +71,7 @@ export function AdminDashboard({ initial }: Props) {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(refresh, 10_000);
+    const id = setInterval(refresh, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -182,7 +82,7 @@ export function AdminDashboard({ initial }: Props) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -213,41 +113,18 @@ export function AdminDashboard({ initial }: Props) {
   );
 
   const status = deriveStatus(config);
-  const canaryPct = config?.trafficProdCanaryPercent ?? 100;
-  const shadowPct = config?.trafficShadowPercent ?? 0;
+  const { canaryPct, shadowPct, newShare, prevShare } =
+    computeTrafficShares(config);
   const prevHost = config?.deploymentDomainProdPrevious;
   const prodHost = config?.deploymentDomainProd;
   const shadowHost = config?.deploymentDomainShadow;
 
-  const totalProdShare = 100 - shadowPct;
-  const newShare = (totalProdShare * canaryPct) / 100;
-  const prevShare = prevHost ? totalProdShare - newShare : 0;
-
-  const startedAt = config?.canaryStartedAt
-    ? new Date(config.canaryStartedAt).getTime()
-    : null;
-  const canaryLive =
-    status === 'ramping' || status === 'starting' || status === 'paused';
-  const elapsed = startedAt !== null && now !== null ? now - startedAt : null;
+  const canaryLive = isCanaryLive(status);
+  const { elapsed, msToNext, overdue: nextCheckOverdue } = computeTiming(
+    config,
+    now,
+  );
   const hour = now !== null ? parisHour(now) : null;
-  // "Next check" is based on the last recorded SLO check + 15min when we have
-  // one (what actually happened), not the theoretical cron schedule. GH Actions
-  // cron has multi-minute latency and can fire at :03 instead of :00 — using
-  // the theoretical next :00/:15/:30/:45 drifts from reality by that margin.
-  // When no SLO check has run yet, fall back to the cron schedule.
-  const lastSloTs = config?.sloChecks?.[0]?.ts
-    ? new Date(config.sloChecks[0].ts).getTime()
-    : null;
-  const expectedNextTs =
-    lastSloTs !== null
-      ? lastSloTs + 15 * 60_000
-      : now !== null
-        ? nextCronFireMs(now)
-        : null;
-  // Signed: positive = still to come, negative = overdue (cron is late).
-  const msToNext =
-    expectedNextTs !== null && now !== null ? expectedNextTs - now : null;
-  const nextCheckOverdue = msToNext !== null && msToNext < 0;
   const activePhase = statusToPhase(status);
 
   const isBusy = pendingAction !== null;
@@ -678,14 +555,6 @@ export function AdminDashboard({ initial }: Props) {
    ======================================================================== */
 
 function StatusLine({ status, pct }: { status: Status; pct: number }) {
-  const label: Record<Status, string> = {
-    stable: 'Stable · pas de canary',
-    starting: 'Canary armé · en attente du premier check SLO',
-    ramping: 'Canary en progression',
-    paused: 'Canary en pause',
-    'complete-sticky': 'Canary complet · sticky tail en cours',
-    unknown: 'État inconnu',
-  };
   return (
     <div className="adm-status">
       <span
@@ -694,7 +563,7 @@ function StatusLine({ status, pct }: { status: Status; pct: number }) {
         }`}
         aria-hidden="true"
       />
-      <span className="adm-status-label">{label[status]}</span>
+      <span className="adm-status-label">{STATUS_LABEL[status]}</span>
       {status !== 'stable' && status !== 'unknown' && (
         <span className="adm-status-pct">{pct}%</span>
       )}
@@ -766,32 +635,6 @@ function TimingLine({
   );
 }
 
-type Segment = {
-  label: string;
-  // Width of this segment in the bar (its actual share of total traffic).
-  // Summed across segments = 100%.
-  widthValue: number;
-  // Primary legend number: shows the *canary knob* integer the user
-  // controls (shadowPct directly, or canaryPct vs 100-canaryPct for prod
-  // buckets) — matches the SLO log and the "Canary en progression X%"
-  // header. These don't sum to 100 across all segments because shadow is
-  // a pre-filter and canary is a sub-split, but each one matches the knob
-  // the user thinks about.
-  displayPct: number;
-  // Short suffix clarifying the denominator of displayPct, e.g. "du prod"
-  // for new/previous, or "du total" for shadow. Avoids the ambiguity of
-  // which % we're showing.
-  displayUnit: string;
-  // Tiny secondary line showing the actual traffic share (widthValue) when
-  // it differs from displayPct — useful when the ~1% shadow offset makes
-  // them disagree (e.g. canary knob 9% → effective 8.9% of total).
-  effectiveHint?: string;
-  color: string;
-  host: string;
-  active: boolean;
-  info?: BucketInfo;
-};
-
 function TrafficBar({ segments }: { segments: Segment[] }) {
   const total = segments.reduce((s, x) => s + x.widthValue, 0) || 1;
   return (
@@ -834,8 +677,8 @@ function TrafficBar({ segments }: { segments: Segment[] }) {
                   )}
                   {s.info.message && (
                     <span className="adm-legend-commit" title={s.info.message}>
-                      {s.info.message.split('\n')[0].slice(0, 60)}
-                      {(s.info.message.split('\n')[0].length > 60) && '…'}
+                      {firstLine(s.info.message).slice(0, 60)}
+                      {firstLine(s.info.message).length > 60 && '…'}
                     </span>
                   )}
                 </span>
@@ -864,7 +707,7 @@ function SloLog({
   checks,
   now,
 }: {
-  checks: NonNullable<ShadowConfig['sloChecks']>;
+  checks: SloCheck[];
   now: number | null;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -1195,7 +1038,7 @@ function ShadowHistoryRow({
       />
       <div className="adm-deploy-body">
         <div className="adm-deploy-message">
-          {msg.split('\n')[0]}
+          {firstLine(msg)}
           {isCurrent && <span className="adm-deploy-current">current</span>}
         </div>
         <div className="adm-deploy-meta">
@@ -1257,7 +1100,7 @@ function DeploymentRow({
       />
       <div className="adm-deploy-body">
         <div className="adm-deploy-message">
-          {msg.split('\n')[0]}
+          {firstLine(msg)}
           {isCurrent && <span className="adm-deploy-current">current</span>}
         </div>
         <div className="adm-deploy-meta">
