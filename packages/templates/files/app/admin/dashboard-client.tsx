@@ -34,6 +34,8 @@ import { TrafficBar } from './components/traffic-bar';
 import { ActionButton } from './components/action-button';
 import { SloLogCard } from './components/slo-log-card';
 import { ShadowPercentCard } from './components/shadow-percent-card';
+import { ShadowHistoryCard } from './components/shadow-history-card';
+import { DeploymentsCard } from './components/deployments-card';
 
 export function AdminDashboard({ initial }: DashboardProps) {
   const { state, refresh } = useDashboardState(initial);
@@ -273,7 +275,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         />
 
         {/* ---------- Shadow history ---------- */}
-        <ShadowHistorySection
+        <ShadowHistoryCard
           entries={shadowHistory}
           currentShadowUrl={config?.deploymentDomainShadow}
           pendingAction={pendingAction}
@@ -288,51 +290,14 @@ export function AdminDashboard({ initial }: DashboardProps) {
         <PhasesDiagram activePhase={activePhase} />
 
         {/* ---------- Deployments ---------- */}
-        <section className="adm-card">
-          <div className="adm-card-header">
-            <h2 className="adm-card-title">Deploys production récents</h2>
-            <span
-              style={{
-                fontSize: '0.72rem',
-                opacity: 0.4,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-              }}
-            >
-              {deployments.length}
-            </span>
-          </div>
-          <p className="adm-card-hint">
-            Les 20 derniers deploys de la branche <code>production</code>.
-            Cliquer « Rollback » re-alias le custom domain sur ce deploy et
-            remet <code>trafficProdCanaryPercent</code> à 100 — les sessions
-            sticky continuent sur leur deploy assigné jusqu&apos;à expiration.
-          </p>
-          {deployments.length === 0 ? (
-            <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
-              Aucun deploy.
-            </p>
-          ) : (
-            <ul className="adm-deploys" role="list">
-              {deployments.map((d) => {
-                const isCurrent = Boolean(
-                  prodHost && d.url && prodHost.includes(d.url),
-                );
-                return (
-                  <DeploymentRow
-                    key={d.uid}
-                    deployment={d}
-                    isCurrent={isCurrent}
-                    disabled={isBusy || isCurrent || d.state !== 'READY'}
-                    pending={pendingAction === `rollback-${d.uid}`}
-                    onRollback={() => setModal({ kind: 'rollback', deploy: d })}
-                    now={now}
-                  />
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        <DeploymentsCard
+          deployments={deployments}
+          prodHost={prodHost}
+          pendingAction={pendingAction}
+          disabled={isBusy}
+          onRollback={(deploy) => setModal({ kind: 'rollback', deploy })}
+          now={now}
+        />
       </div>
 
       {/* ---------- Modals ---------- */}
@@ -486,183 +451,3 @@ export function AdminDashboard({ initial }: DashboardProps) {
    Sub-components
    ======================================================================== */
 
-function ShadowHistorySection({
-  entries,
-  currentShadowUrl,
-  pendingAction,
-  disabled,
-  onRollback,
-  now,
-}: {
-  entries: ShadowHistoryEntry[];
-  currentShadowUrl?: string;
-  pendingAction: string | null;
-  disabled: boolean;
-  onRollback: (entry: ShadowHistoryEntry) => void;
-  now: number | null;
-}) {
-  return (
-    <section className="adm-card">
-      <div className="adm-card-header">
-        <h2 className="adm-card-title">Shadow deploys récents</h2>
-        <span
-          style={{
-            fontSize: '0.72rem',
-            opacity: 0.4,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-          }}
-        >
-          {entries.length} / 20
-        </span>
-      </div>
-      <p className="adm-card-hint">
-        Les 20 derniers deploys de la branche <code>master</code>. Chaque push
-        sur <code>master</code> empile l&apos;ancien URL ici avant d&apos;être
-        remplacé. Cliquer « Rollback » passe <code>deploymentDomainShadow</code>{' '}
-        sur ce deploy — pas de re-alias de domaine, propagation ≤ 60s.
-      </p>
-      {entries.length === 0 ? (
-        <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
-          Aucun shadow précédent — le premier apparaîtra ici après le prochain
-          push sur <code>master</code>.
-        </p>
-      ) : (
-        <ul className="adm-deploys" role="list">
-          {entries.map((e) => (
-            <ShadowHistoryRow
-              key={e.url}
-              entry={e}
-              isCurrent={Boolean(
-                currentShadowUrl && currentShadowUrl === e.url,
-              )}
-              disabled={disabled}
-              pending={pendingAction === `rollback-shadow-${e.url}`}
-              onRollback={() => onRollback(e)}
-              now={now}
-            />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function ShadowHistoryRow({
-  entry,
-  isCurrent,
-  onRollback,
-  disabled,
-  pending,
-  now,
-}: {
-  entry: ShadowHistoryEntry;
-  isCurrent: boolean;
-  onRollback: () => void;
-  disabled: boolean;
-  pending: boolean;
-  now: number | null;
-}) {
-  const ref = entry.ref ?? 'master';
-  const sha = entry.sha?.slice(0, 7) ?? '';
-  const msg = entry.message ?? shortHost(entry.url);
-  const state = entry.state;
-  const stateClass =
-    state === 'READY'
-      ? 'adm-deploy-state--ready'
-      : state === 'ERROR'
-        ? 'adm-deploy-state--error'
-        : 'adm-deploy-state--other';
-
-  return (
-    <li className="adm-deploy">
-      <span
-        aria-hidden="true"
-        title={state ?? 'unknown'}
-        className={`adm-deploy-state ${stateClass}`}
-      />
-      <div className="adm-deploy-body">
-        <div className="adm-deploy-message">
-          {firstLine(msg)}
-          {isCurrent && <span className="adm-deploy-current">current</span>}
-        </div>
-        <div className="adm-deploy-meta">
-          <code>{ref}</code>
-          {sha && <code>{sha}</code>}
-          {entry.createdAt && <span>{prettyTimeAgo(entry.createdAt, now)}</span>}
-          <code>{shortHost(entry.url)}</code>
-        </div>
-      </div>
-      <button
-        type="button"
-        className={`adm-btn adm-btn--small${pending ? ' adm-btn--pending' : ''}`}
-        onClick={onRollback}
-        disabled={disabled || isCurrent || state === 'ERROR'}
-        title={
-          isCurrent
-            ? 'Déjà le shadow actuel'
-            : 'Passer deploymentDomainShadow sur ce deploy'
-        }
-      >
-        {isCurrent ? 'actuel' : 'Rollback'}
-      </button>
-    </li>
-  );
-}
-
-function DeploymentRow({
-  deployment,
-  isCurrent,
-  onRollback,
-  disabled,
-  pending,
-  now,
-}: {
-  deployment: Deployment;
-  isCurrent: boolean;
-  onRollback: () => void;
-  disabled: boolean;
-  pending: boolean;
-  now: number | null;
-}) {
-  const ref = deployment.meta?.githubCommitRef ?? '—';
-  const sha = deployment.meta?.githubCommitSha?.slice(0, 7) ?? '';
-  const msg = deployment.meta?.githubCommitMessage ?? deployment.name;
-  const state = deployment.state;
-  const stateClass =
-    state === 'READY'
-      ? 'adm-deploy-state--ready'
-      : state === 'ERROR'
-        ? 'adm-deploy-state--error'
-        : 'adm-deploy-state--other';
-
-  return (
-    <li className="adm-deploy">
-      <span
-        aria-hidden="true"
-        title={state}
-        className={`adm-deploy-state ${stateClass}`}
-      />
-      <div className="adm-deploy-body">
-        <div className="adm-deploy-message">
-          {firstLine(msg)}
-          {isCurrent && <span className="adm-deploy-current">current</span>}
-        </div>
-        <div className="adm-deploy-meta">
-          <code>{ref}</code>
-          {sha && <code>{sha}</code>}
-          <span>{prettyTimeAgo(deployment.createdAt, now)}</span>
-          <code>{shortHost(deployment.url)}</code>
-        </div>
-      </div>
-      <button
-        type="button"
-        className={`adm-btn adm-btn--small${pending ? ' adm-btn--pending' : ''}`}
-        onClick={onRollback}
-        disabled={disabled}
-      >
-        Rollback
-      </button>
-    </li>
-  );
-}
