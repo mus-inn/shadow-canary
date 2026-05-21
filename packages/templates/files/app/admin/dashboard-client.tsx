@@ -32,6 +32,8 @@ import { StatusLine } from './components/status-line';
 import { TimingLine } from './components/timing-line';
 import { TrafficBar } from './components/traffic-bar';
 import { ActionButton } from './components/action-button';
+import { SloLogCard } from './components/slo-log-card';
+import { ShadowPercentCard } from './components/shadow-percent-card';
 
 export function AdminDashboard({ initial }: DashboardProps) {
   const { state, refresh } = useDashboardState(initial);
@@ -255,7 +257,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         </section>
 
         {/* ---------- SLO check log ---------- */}
-        <SloLog checks={config?.sloChecks ?? []} now={now} />
+        <SloLogCard checks={config?.sloChecks ?? []} now={now} />
 
         {/* ---------- Bucket forcer (dev test aid) ---------- */}
         <BucketForcer />
@@ -483,208 +485,6 @@ export function AdminDashboard({ initial }: DashboardProps) {
 /* ========================================================================
    Sub-components
    ======================================================================== */
-
-function SloLog({
-  checks,
-  now,
-}: {
-  checks: SloCheck[];
-  now: number | null;
-}) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const toggle = useCallback((i: number) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
-  }, []);
-
-  return (
-    <section className="adm-card">
-      <div className="adm-card-header">
-        <h2 className="adm-card-title">Historique SLO (canary ramp)</h2>
-        <span
-          style={{
-            fontSize: '0.72rem',
-            opacity: 0.4,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-          }}
-        >
-          {checks.length} / 10
-        </span>
-      </div>
-      <p className="adm-card-hint">
-        Les derniers checks exécutés par <code>canary-ramp.yml</code> (toutes
-        les 15 min quand un canary est en cours). Pratique pour comprendre
-        pourquoi le canary n&apos;avance pas : si la liste est vide, la cron
-        ne tourne pas ; si elle est pleine de{' '}
-        <span className="adm-slo-ok-inline">✓</span>, le ramp avance ; des{' '}
-        <span className="adm-slo-ko-inline">✗</span> indiquent un SLO qui a
-        rollback. Clique sur une ligne pour voir le body complet du dernier
-        probe.
-      </p>
-      {checks.length === 0 ? (
-        <p style={{ opacity: 0.5, fontSize: '0.9rem', margin: 0 }}>
-          Aucun check SLO enregistré — vérifier que le workflow{' '}
-          <code>canary-ramp.yml</code> existe et tourne sur la default branch.
-        </p>
-      ) : (
-        <ul className="adm-slo-list" role="list">
-          {checks.map((c, i) => {
-            const ts = new Date(c.ts).getTime();
-            const ago = prettyTimeAgo(ts, now);
-            // Render the full timestamp only after mount — `toLocaleString`
-            // without explicit timeZone uses the runtime's default tz, which
-            // differs between server (UTC on Vercel) and client (user local),
-            // producing different attribute strings → React error #418.
-            const fullTs =
-              now !== null
-                ? new Date(c.ts).toLocaleString('fr-FR', {
-                    timeZone: 'Europe/Paris',
-                  })
-                : '';
-            const codes = c.codes.map((x) => x || '—').join(' / ');
-            const isRollback = !c.ok && c.pctAfter === 0;
-            const isOpen = expanded.has(i);
-            const hasBody = Boolean(c.bodyExcerpt);
-            return (
-              <li
-                key={`${c.ts}-${i}`}
-                className={`adm-slo-row ${c.ok ? 'adm-slo-row--ok' : 'adm-slo-row--ko'}${hasBody ? ' adm-slo-row--clickable' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="adm-slo-summary"
-                  onClick={() => hasBody && toggle(i)}
-                  disabled={!hasBody}
-                  aria-expanded={isOpen}
-                  aria-label={
-                    hasBody
-                      ? isOpen
-                        ? 'Masquer le body complet'
-                        : 'Afficher le body complet'
-                      : 'Aucun body enregistré'
-                  }
-                >
-                  <span className="adm-slo-icon" aria-hidden="true">
-                    {c.ok ? '✓' : '✗'}
-                  </span>
-                  <span className="adm-slo-time" title={fullTs}>
-                    {ago}
-                  </span>
-                  <code className="adm-slo-codes">{codes}</code>
-                  <span className="adm-slo-pct">
-                    {c.pctBefore}% →{' '}
-                    <strong>{c.pctAfter}%</strong>
-                    {isRollback && (
-                      <span className="adm-slo-badge">rollback</span>
-                    )}
-                  </span>
-                  {hasBody && (
-                    <span
-                      className="adm-slo-caret"
-                      aria-hidden="true"
-                    >
-                      {isOpen ? '▾' : '▸'}
-                    </span>
-                  )}
-                </button>
-                {hasBody && (
-                  <div
-                    className={`adm-slo-body-wrap${isOpen ? ' adm-slo-body-wrap--open' : ''}`}
-                  >
-                    {isOpen ? (
-                      <pre className="adm-slo-body-full">{c.bodyExcerpt}</pre>
-                    ) : (
-                      <code
-                        className="adm-slo-body-preview"
-                        title={c.bodyExcerpt}
-                      >
-                        {c.bodyExcerpt.length > 80
-                          ? c.bodyExcerpt.slice(0, 80) + '…'
-                          : c.bodyExcerpt}
-                      </code>
-                    )}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function ShadowPercentCard({
-  current,
-  pending,
-  disabled,
-  onSave,
-}: {
-  current: number;
-  pending: boolean;
-  disabled: boolean;
-  onSave: (value: number) => void;
-}) {
-  const [draft, setDraft] = useState<string>(String(current));
-
-  useEffect(() => {
-    setDraft(String(current));
-  }, [current]);
-
-  const parsed = Number(draft);
-  const valid = Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
-  const changed = valid && parsed !== current;
-
-  return (
-    <section className="adm-card">
-      <div className="adm-card-header">
-        <h2 className="adm-card-title">Shadow traffic</h2>
-        <span style={{ fontSize: '0.78rem', opacity: 0.5 }}>
-          actuel <code>{current}%</code>
-        </span>
-      </div>
-      <p className="adm-card-hint">
-        Pourcentage de trafic routé vers le deploy <code>master</code> (shadow).
-        Indépendant du canary. <code>0</code> = kill-switch (plus de trafic
-        shadow), <code>1</code> = nominal. Temporairement plus haut si tu veux
-        stabiliser une mesure (par ex. observer des erreurs rares).
-      </p>
-      <div className="adm-shadow-row">
-        <span className="adm-shadow-input-wrap">
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-invalid={!valid || undefined}
-            aria-label="Nouveau pourcentage shadow"
-            className="adm-input adm-shadow-input"
-          />
-        </span>
-        <button
-          type="button"
-          className={`adm-btn${pending ? ' adm-btn--pending' : ''}`}
-          onClick={() => onSave(parsed)}
-          disabled={disabled || !changed}
-        >
-          Enregistrer
-        </button>
-        {!valid && (
-          <span style={{ color: '#fca5a5', fontSize: '0.8rem' }}>
-            0 – 100 uniquement
-          </span>
-        )}
-      </div>
-    </section>
-  );
-}
 
 function ShadowHistorySection({
   entries,

@@ -35,6 +35,8 @@
     "app/admin/components/status-line.tsx",
     "app/admin/components/timing-line.tsx",
     "app/admin/components/traffic-bar.tsx",
+    "app/admin/components/slo-log-card.tsx",
+    "app/admin/components/shadow-percent-card.tsx",
     "app/api/slo/route.ts",
     "app/api/admin/state/route.ts",
     "app/api/admin/deployments/route.ts",
