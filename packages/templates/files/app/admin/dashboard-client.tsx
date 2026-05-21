@@ -5,11 +5,10 @@ import type { Deployment } from '@/lib/admin-vercel';
 import { BucketForcer } from './bucket-forcer';
 import { ConfirmModal } from './confirm-modal';
 import { PhasesDiagram } from './phases-diagram';
-import { REFRESH_INTERVAL_MS, STEP_DEFAULT, TICK_MS } from './constants/config';
+import { STEP_DEFAULT } from './constants/config';
 import { STATUS_LABEL } from './constants/labels';
 import type {
   BucketInfo,
-  BucketInfoMap,
   DashboardProps,
   Segment,
   ShadowHistoryEntry,
@@ -24,83 +23,30 @@ import { stepSize } from './utils/step';
 import { computeTrafficShares } from './utils/traffic';
 import { computeTiming } from './utils/timing';
 import { adminApi } from './api/admin-client';
+import { useWallClock } from './hooks/use-wall-clock';
+import { usePollRefresh } from './hooks/use-poll-refresh';
+import { useDashboardState } from './hooks/use-dashboard-state';
+import { useActionRunner } from './hooks/use-action-runner';
 
 export function AdminDashboard({ initial }: DashboardProps) {
-  const [config, setConfig] = useState(initial.config);
-  const [deployments, setDeployments] = useState(initial.deployments);
-  const [bucketInfo, setBucketInfo] = useState<BucketInfoMap | null>(null);
-  const [shadowHistory, setShadowHistory] = useState<ShadowHistoryEntry[]>([]);
-  const [error, setError] = useState(initial.error);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const { state, refresh } = useDashboardState(initial);
+  const { config, deployments, bucketInfo, shadowHistory, error, refreshing } =
+    state;
+
   const [modal, setModal] = useState<ModalState>(null);
   const [stepInput, setStepInput] = useState<string>(String(STEP_DEFAULT));
 
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const [stateRes, deployRes, bucketRes, historyRes] =
-        await Promise.allSettled([
-          adminApi.fetchState(),
-          adminApi.fetchDeployments(),
-          adminApi.fetchBucketInfo(),
-          adminApi.fetchShadowHistory(),
-        ]);
-      if (stateRes.status === 'fulfilled') setConfig(stateRes.value.config);
-      if (deployRes.status === 'fulfilled')
-        setDeployments(deployRes.value.deployments);
-      if (bucketRes.status === 'fulfilled') setBucketInfo(bucketRes.value);
-      if (historyRes.status === 'fulfilled')
-        setShadowHistory(historyRes.value.entries ?? []);
+  const closeModal = useCallback(() => setModal(null), []);
 
-      const firstFailed = [stateRes, deployRes, bucketRes, historyRes].find(
-        (r) => r.status === 'rejected',
-      );
-      if (firstFailed?.status === 'rejected') {
-        const reason = firstFailed.reason;
-        setError(reason instanceof Error ? reason.message : 'refresh failed');
-      } else {
-        setError(null);
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
+  const { pendingAction, actionError, run } = useActionRunner({
+    onSuccess: useCallback(async () => {
+      await refresh();
+      closeModal();
+    }, [refresh, closeModal]),
+  });
 
-  useEffect(() => {
-    const id = setInterval(refresh, REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refresh]);
-
-  // Wall-clock ticker — separate from the 10s data refresh so the countdown
-  // ticks smoothly without triggering network calls. `now` is null on SSR +
-  // first hydration so time-dependent text doesn't mismatch between server
-  // and client renders (React error #418).
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  const run = useCallback(
-    async (id: string, fn: () => Promise<void>) => {
-      if (pendingAction) return;
-      setActionError(null);
-      setPendingAction(id);
-      try {
-        await fn();
-        await refresh();
-        setModal(null);
-      } catch (e) {
-        setActionError(e instanceof Error ? e.message : 'action failed');
-      } finally {
-        setPendingAction(null);
-      }
-    },
-    [pendingAction, refresh],
-  );
+  usePollRefresh(refresh);
+  const now = useWallClock();
 
   const status = deriveStatus(config);
   const { canaryPct, shadowPct, newShare, prevShare } =
@@ -415,7 +361,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         confirmPhrase="cancel"
         confirmLabel="Annuler le canary"
         pending={pendingAction === 'cancel'}
-        onClose={() => setModal(null)}
+        onClose={closeModal}
         onConfirm={() => void run('cancel', adminApi.cancel)}
       />
 
@@ -439,7 +385,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
         confirmPhrase="promote"
         confirmLabel="Promote à 100%"
         pending={pendingAction === 'promote'}
-        onClose={() => setModal(null)}
+        onClose={closeModal}
         onConfirm={() => void run('promote', adminApi.promote)}
       />
 
@@ -476,7 +422,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
           modal?.kind === 'rollback' &&
           pendingAction === `rollback-${modal.deploy.uid}`
         }
-        onClose={() => setModal(null)}
+        onClose={closeModal}
         onConfirm={() => {
           if (modal?.kind !== 'rollback') return;
           const d = modal.deploy;
@@ -528,7 +474,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
           modal?.kind === 'rollback-shadow' &&
           pendingAction === `rollback-shadow-${modal.target.url}`
         }
-        onClose={() => setModal(null)}
+        onClose={closeModal}
         onConfirm={() => {
           if (modal?.kind !== 'rollback-shadow') return;
           void run(`rollback-shadow-${modal.target.url}`, () =>
