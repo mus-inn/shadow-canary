@@ -16,6 +16,8 @@
     "lint": "pnpm -r lint",
     "dev:docs": "pnpm --filter=./docs dev",
     "build:docs": "pnpm --filter=./docs build",
+    "sync:templates": "node packages/templates/bin/sync-from-source.mjs",
+    "sync:templates:check": "node packages/templates/bin/sync-from-source.mjs --check",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "pnpm build && changeset publish"

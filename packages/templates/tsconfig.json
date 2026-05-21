@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "jsx": "preserve",
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./files/*"]
+    }
+  },
+  "include": ["files/**/*.ts", "files/**/*.tsx", "tests/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules"]
+}
