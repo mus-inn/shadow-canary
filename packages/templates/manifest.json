@@ -43,6 +43,7 @@
     "app/admin/components/canary-actions.tsx",
     "app/admin/components/canary-manual-controls.tsx",
     "app/admin/components/canary-state-card.tsx",
+    "app/admin/components/canary-modals.tsx",
     "app/admin/utils/segments.ts",
     "app/api/slo/route.ts",
     "app/api/admin/state/route.ts",
