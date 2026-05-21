@@ -27,6 +27,11 @@ import { useWallClock } from './hooks/use-wall-clock';
 import { usePollRefresh } from './hooks/use-poll-refresh';
 import { useDashboardState } from './hooks/use-dashboard-state';
 import { useActionRunner } from './hooks/use-action-runner';
+import { StateBanners } from './components/state-banners';
+import { StatusLine } from './components/status-line';
+import { TimingLine } from './components/timing-line';
+import { TrafficBar } from './components/traffic-bar';
+import { ActionButton } from './components/action-button';
 
 export function AdminDashboard({ initial }: DashboardProps) {
   const { state, refresh } = useDashboardState(initial);
@@ -68,18 +73,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
   return (
     <>
       <div className="adm-stack">
-        {error && (
-          <div className="adm-banner adm-banner--error" role="alert">
-            <span className="adm-banner-icon">⚠</span>
-            <span>Backend : {error}</span>
-          </div>
-        )}
-        {actionError && (
-          <div className="adm-banner adm-banner--error" role="alert">
-            <span className="adm-banner-icon">⚠</span>
-            <span>Action : {actionError}</span>
-          </div>
-        )}
+        <StateBanners error={error} actionError={actionError} />
 
         {/* ---------- Canary state ---------- */}
         <section className="adm-card adm-card--emphasis">
@@ -165,7 +159,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
           </div>
 
           <div className="adm-actions">
-            <ActionBtn
+            <ActionButton
               id="pause"
               pendingId={pendingAction}
               disabled={
@@ -178,16 +172,16 @@ export function AdminDashboard({ initial }: DashboardProps) {
               onClick={() => void run('pause', adminApi.pause)}
             >
               Pause
-            </ActionBtn>
-            <ActionBtn
+            </ActionButton>
+            <ActionButton
               id="resume"
               pendingId={pendingAction}
               disabled={isBusy || !config?.canaryPaused}
               onClick={() => void run('resume', adminApi.resume)}
             >
               Resume
-            </ActionBtn>
-            <ActionBtn
+            </ActionButton>
+            <ActionButton
               id="cancel"
               variant="danger"
               pendingId={pendingAction}
@@ -195,7 +189,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
               onClick={() => setModal({ kind: 'cancel' })}
             >
               Cancel canary
-            </ActionBtn>
+            </ActionButton>
             <span className="adm-actions-spacer" />
           </div>
 
@@ -214,7 +208,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
                 disabled={isBusy}
               />
             </span>
-            <ActionBtn
+            <ActionButton
               id="step-back"
               pendingId={pendingAction}
               disabled={
@@ -230,8 +224,8 @@ export function AdminDashboard({ initial }: DashboardProps) {
               }
             >
               − {stepSize(stepInput) ?? 4}% (step back)
-            </ActionBtn>
-            <ActionBtn
+            </ActionButton>
+            <ActionButton
               id="step-forward"
               pendingId={pendingAction}
               disabled={
@@ -247,8 +241,8 @@ export function AdminDashboard({ initial }: DashboardProps) {
               }
             >
               + {stepSize(stepInput) ?? 4}% (step forward)
-            </ActionBtn>
-            <ActionBtn
+            </ActionButton>
+            <ActionButton
               id="promote"
               variant="primary"
               pendingId={pendingAction}
@@ -256,7 +250,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
               onClick={() => setModal({ kind: 'promote' })}
             >
               Promote à 100%
-            </ActionBtn>
+            </ActionButton>
           </div>
         </section>
 
@@ -490,155 +484,6 @@ export function AdminDashboard({ initial }: DashboardProps) {
    Sub-components
    ======================================================================== */
 
-function StatusLine({ status, pct }: { status: Status; pct: number }) {
-  return (
-    <div className="adm-status">
-      <span
-        className={`adm-status-dot adm-status-dot--${
-          status === 'complete-sticky' ? 'complete' : status
-        }`}
-        aria-hidden="true"
-      />
-      <span className="adm-status-label">{STATUS_LABEL[status]}</span>
-      {status !== 'stable' && status !== 'unknown' && (
-        <span className="adm-status-pct">{pct}%</span>
-      )}
-    </div>
-  );
-}
-
-function TimingLine({
-  canaryLive,
-  status,
-  elapsed,
-  msToNext,
-  overdue,
-  phase,
-}: {
-  canaryLive: boolean;
-  status: Status;
-  elapsed: number | null;
-  msToNext: number | null;
-  overdue: boolean;
-  phase: string | null;
-}) {
-  const items: React.ReactNode[] = [];
-  if (phase !== null) items.push(phase);
-  if (elapsed !== null) {
-    items.push(<>Démarré il y a {formatDuration(elapsed)}</>);
-  }
-  if ((status === 'ramping' || status === 'starting') && msToNext !== null) {
-    items.push(
-      overdue ? (
-        <>
-          Check attendu{' '}
-          <span className="adm-timing-countdown adm-timing-countdown--overdue">
-            il y a {formatDuration(-msToNext)}
-          </span>
-        </>
-      ) : (
-        <>
-          Prochain check dans{' '}
-          <span className="adm-timing-countdown">
-            {formatDuration(msToNext)}
-          </span>
-        </>
-      ),
-    );
-  } else if (status === 'paused') {
-    items.push(<>Pause · cron skippé</>);
-  }
-
-  if (items.length === 0) return null;
-  if (items.length === 1 && status === 'stable') return null;
-
-  return (
-    <div className="adm-timing">
-      <div className="adm-timing-row">
-        {items.map((x, i) => (
-          <span key={i}>
-            {i > 0 && <span className="adm-timing-sep"> · </span>}
-            {x}
-          </span>
-        ))}
-      </div>
-      {canaryLive && status === 'ramping' && (
-        <div className="adm-timing-note">
-          Le cron GitHub Actions peut avoir plusieurs minutes de latence.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrafficBar({ segments }: { segments: Segment[] }) {
-  const total = segments.reduce((s, x) => s + x.widthValue, 0) || 1;
-  return (
-    <div>
-      <div className="adm-bar" role="img" aria-label="Répartition du trafic">
-        {segments.map((s, i) => (
-          <div
-            key={i}
-            className={`adm-bar-seg${s.active ? ' adm-bar-seg--active' : ''}`}
-            style={
-              {
-                width: `${(s.widthValue / total) * 100}%`,
-                ['--adm-seg-color' as string]: s.color,
-              } as React.CSSProperties
-            }
-            title={`${s.label} — ${s.displayPct}% ${s.displayUnit} (${s.widthValue.toFixed(1)}% du trafic, ${s.host})`}
-          />
-        ))}
-      </div>
-      <ul className="adm-legend" role="list">
-        {segments.map((s, i) => (
-          <li key={i} className="adm-legend-row">
-            <span
-              aria-hidden="true"
-              className="adm-legend-dot"
-              style={
-                { ['--adm-seg-color' as string]: s.color } as React.CSSProperties
-              }
-            />
-            <span className="adm-legend-meta">
-              <span className="adm-legend-label-row">
-                <span className="adm-legend-label">{s.label}</span>
-                <code className="adm-legend-host">{s.host}</code>
-              </span>
-              {s.info && (s.info.ref || s.info.sha) && (
-                <span className="adm-legend-deploy">
-                  {s.info.ref && <code className="adm-legend-ref">{s.info.ref}</code>}
-                  {s.info.sha && (
-                    <code className="adm-legend-sha">@{s.info.sha.slice(0, 7)}</code>
-                  )}
-                  {s.info.message && (
-                    <span className="adm-legend-commit" title={s.info.message}>
-                      {firstLine(s.info.message).slice(0, 60)}
-                      {firstLine(s.info.message).length > 60 && '…'}
-                    </span>
-                  )}
-                </span>
-              )}
-            </span>
-            <span className="adm-legend-value">
-              <span>
-                {s.displayPct}%
-                <span className="adm-legend-value-unit">
-                  {' '}
-                  {s.displayUnit}
-                </span>
-              </span>
-              {s.effectiveHint && (
-                <span className="adm-legend-value-hint">{s.effectiveHint}</span>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function SloLog({
   checks,
   now,
@@ -771,42 +616,6 @@ function SloLog({
         </ul>
       )}
     </section>
-  );
-}
-
-function ActionBtn({
-  id,
-  children,
-  onClick,
-  disabled,
-  pendingId,
-  variant = 'default',
-}: {
-  id: string;
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  pendingId: string | null;
-  variant?: 'default' | 'primary' | 'danger';
-}) {
-  const isPending = pendingId === id;
-  const className = [
-    'adm-btn',
-    variant === 'primary' && 'adm-btn--primary',
-    variant === 'danger' && 'adm-btn--danger',
-    isPending && 'adm-btn--pending',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {children}
-    </button>
   );
 }
 
