@@ -17,9 +17,8 @@ import type {
 } from './types/dashboard';
 import type { ModalState } from './types/modal';
 import { deriveStatus, isCanaryLive, statusToPhase } from './utils/status';
-import { firstLine, formatDuration, prettyTimeAgo, shortHost } from './utils/format';
+import { firstLine, prettyTimeAgo, shortHost } from './utils/format';
 import { parisHour, phaseLabel } from './utils/time';
-import { stepSize } from './utils/step';
 import { computeTrafficShares } from './utils/traffic';
 import { computeTiming } from './utils/timing';
 import { adminApi } from './api/admin-client';
@@ -28,11 +27,8 @@ import { usePollRefresh } from './hooks/use-poll-refresh';
 import { useDashboardState } from './hooks/use-dashboard-state';
 import { useActionRunner } from './hooks/use-action-runner';
 import { StateBanners } from './components/state-banners';
-import { StatusLine } from './components/status-line';
-import { TimingLine } from './components/timing-line';
-import { TrafficBar } from './components/traffic-bar';
-import { ActionButton } from './components/action-button';
 import { SloLogCard } from './components/slo-log-card';
+import { CanaryStateCard } from './components/canary-state-card';
 import { ShadowPercentCard } from './components/shadow-percent-card';
 import { ShadowHistoryCard } from './components/shadow-history-card';
 import { DeploymentsCard } from './components/deployments-card';
@@ -58,8 +54,8 @@ export function AdminDashboard({ initial }: DashboardProps) {
   const now = useWallClock();
 
   const status = deriveStatus(config);
-  const { canaryPct, shadowPct, newShare, prevShare } =
-    computeTrafficShares(config);
+  const shares = computeTrafficShares(config);
+  const { canaryPct } = shares;
   const prevHost = config?.deploymentDomainProdPrevious;
   const prodHost = config?.deploymentDomainProd;
   const shadowHost = config?.deploymentDomainShadow;
@@ -80,183 +76,36 @@ export function AdminDashboard({ initial }: DashboardProps) {
         <StateBanners error={error} actionError={actionError} />
 
         {/* ---------- Canary state ---------- */}
-        <section className="adm-card adm-card--emphasis">
-          <div className="adm-card-header">
-            <h2 className="adm-card-title">État du canary</h2>
-            <button
-              type="button"
-              className="adm-refresh"
-              onClick={() => void refresh()}
-              aria-label="Rafraîchir"
-            >
-              {refreshing ? (
-                <span className="adm-refresh-spin" aria-hidden="true" />
-              ) : null}
-              {refreshing ? 'Sync…' : 'Refresh'}
-            </button>
-          </div>
-
-          <StatusLine status={status} pct={canaryPct} />
-          <TimingLine
-            canaryLive={canaryLive}
-            status={status}
-            elapsed={elapsed}
-            msToNext={msToNext}
-            overdue={nextCheckOverdue}
-            phase={hour !== null ? phaseLabel(hour) : null}
-          />
-
-          <div className="adm-bar-wrap">
-            <TrafficBar
-              segments={[
-                {
-                  label: 'shadow (master)',
-                  widthValue: shadowPct,
-                  displayPct: shadowPct,
-                  displayUnit: 'du total',
-                  color: '#f97316',
-                  host: shortHost(shadowHost),
-                  active: true,
-                  info: bucketInfo?.shadow,
-                },
-                ...(prevHost
-                  ? [
-                      {
-                        label: 'previous prod',
-                        widthValue: prevShare,
-                        displayPct: 100 - canaryPct,
-                        displayUnit: 'du prod',
-                        // Only surface the "actual traffic share" line when
-                        // shadow is consuming enough to push the numbers
-                        // apart (≥ 0.5 pt difference). Keeps the legend
-                        // clean when shadow is 0.
-                        effectiveHint:
-                          Math.abs(prevShare - (100 - canaryPct)) >= 0.5
-                            ? `${prevShare.toFixed(1)}% du trafic total`
-                            : undefined,
-                        color: '#6366f1',
-                        host: shortHost(prevHost),
-                        active: canaryLive,
-                        info: bucketInfo?.prodPrevious,
-                      },
-                    ]
-                  : []),
-                {
-                  label: 'new prod',
-                  widthValue: newShare,
-                  displayPct: canaryPct,
-                  displayUnit: 'du prod',
-                  effectiveHint:
-                    Math.abs(newShare - canaryPct) >= 0.5
-                      ? `${newShare.toFixed(1)}% du trafic total`
-                      : undefined,
-                  color: '#22c55e',
-                  host: shortHost(prodHost),
-                  active:
-                    status === 'ramping' ||
-                    status === 'complete-sticky' ||
-                    status === 'stable',
-                  info: bucketInfo?.prodNew,
-                },
-              ]}
-            />
-          </div>
-
-          <div className="adm-actions">
-            <ActionButton
-              id="pause"
-              pendingId={pendingAction}
-              disabled={
-                isBusy ||
-                status === 'stable' ||
-                status === 'paused' ||
-                status === 'complete-sticky' ||
-                !prevHost
-              }
-              onClick={() => void run('pause', adminApi.pause)}
-            >
-              Pause
-            </ActionButton>
-            <ActionButton
-              id="resume"
-              pendingId={pendingAction}
-              disabled={isBusy || !config?.canaryPaused}
-              onClick={() => void run('resume', adminApi.resume)}
-            >
-              Resume
-            </ActionButton>
-            <ActionButton
-              id="cancel"
-              variant="danger"
-              pendingId={pendingAction}
-              disabled={isBusy || status === 'stable' || !prevHost}
-              onClick={() => setModal({ kind: 'cancel' })}
-            >
-              Cancel canary
-            </ActionButton>
-            <span className="adm-actions-spacer" />
-          </div>
-
-          <div className="adm-actions adm-actions--secondary">
-            <span className="adm-actions-label">Manuel</span>
-            <span className="adm-step-input-wrap">
-              <input
-                type="number"
-                min={1}
-                max={50}
-                step={1}
-                value={stepInput}
-                onChange={(e) => setStepInput(e.target.value)}
-                aria-label="Taille du pas (en points de %)"
-                className="adm-input adm-step-input"
-                disabled={isBusy}
-              />
-            </span>
-            <ActionButton
-              id="step-back"
-              pendingId={pendingAction}
-              disabled={
-                isBusy ||
-                canaryPct <= 0 ||
-                !prevHost ||
-                !stepSize(stepInput)
-              }
-              onClick={() =>
-                void run('step-back', () =>
-                  adminApi.stepBack(stepSize(stepInput) ?? STEP_DEFAULT),
-                )
-              }
-            >
-              − {stepSize(stepInput) ?? 4}% (step back)
-            </ActionButton>
-            <ActionButton
-              id="step-forward"
-              pendingId={pendingAction}
-              disabled={
-                isBusy ||
-                canaryPct >= 100 ||
-                !prevHost ||
-                !stepSize(stepInput)
-              }
-              onClick={() =>
-                void run('step-forward', () =>
-                  adminApi.stepForward(stepSize(stepInput) ?? STEP_DEFAULT),
-                )
-              }
-            >
-              + {stepSize(stepInput) ?? 4}% (step forward)
-            </ActionButton>
-            <ActionButton
-              id="promote"
-              variant="primary"
-              pendingId={pendingAction}
-              disabled={isBusy || canaryPct >= 100 || !prevHost}
-              onClick={() => setModal({ kind: 'promote' })}
-            >
-              Promote à 100%
-            </ActionButton>
-          </div>
-        </section>
+        <CanaryStateCard
+          status={status}
+          shares={shares}
+          canaryLive={canaryLive}
+          canaryPaused={Boolean(config?.canaryPaused)}
+          prodHost={prodHost}
+          prevHost={prevHost}
+          shadowHost={shadowHost}
+          bucketInfo={bucketInfo}
+          elapsed={elapsed}
+          msToNext={msToNext}
+          overdue={nextCheckOverdue}
+          phase={hour !== null ? phaseLabel(hour) : null}
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
+          isBusy={isBusy}
+          pendingAction={pendingAction}
+          onPause={() => void run('pause', adminApi.pause)}
+          onResume={() => void run('resume', adminApi.resume)}
+          onCancel={() => setModal({ kind: 'cancel' })}
+          onStepBack={(step) =>
+            void run('step-back', () => adminApi.stepBack(step))
+          }
+          onStepForward={(step) =>
+            void run('step-forward', () => adminApi.stepForward(step))
+          }
+          onPromote={() => setModal({ kind: 'promote' })}
+          stepInput={stepInput}
+          setStepInput={setStepInput}
+        />
 
         {/* ---------- SLO check log ---------- */}
         <SloLogCard checks={config?.sloChecks ?? []} now={now} />
@@ -266,7 +115,7 @@ export function AdminDashboard({ initial }: DashboardProps) {
 
         {/* ---------- Shadow percent ---------- */}
         <ShadowPercentCard
-          current={shadowPct}
+          current={shares.shadowPct}
           pending={pendingAction === 'shadow-percent'}
           disabled={isBusy}
           onSave={(value) =>
