@@ -29,12 +29,27 @@ export type SlotMiddlewareOptions = {
    */
   bypassToken?: string;
   /**
-   * `VERCEL_TARGET_ENV` value of the Custom Environment that owns the routing
-   * decision (the one holding the public domain). Only deploys whose target
-   * env matches run the split. Default: `SHADOW_CANARY_ROUTING_ENV` env var if
-   * set, else `'production'`.
+   * **Custom-environment mode.** `VERCEL_TARGET_ENV` value of the Custom
+   * Environment that owns the routing decision (the one holding the public
+   * domain). Only deploys whose target env matches run the split. Default:
+   * `SHADOW_CANARY_ROUTING_ENV` env var if set, else `'production'`.
+   *
+   * Used only when {@link productionBranch} is not set.
    */
   routingEnv?: string;
+  /**
+   * **Branch mode** (no Custom Environments). When every slot deploys with
+   * `vercel deploy --prod` to the same production env, the git branch is the
+   * only runtime signal. Set this to the production branch name (e.g.
+   * `'production'`): only that branch's deploy owns the split; the nightly /
+   * canary branch deploys serve their own content. The nightly / canary
+   * rewrite targets (`domainNightly` / `domainCanary`) are then the stable
+   * branch-pinned URLs (`<project>-git-<branch>-<team>.vercel.app`).
+   *
+   * Default: `SHADOW_CANARY_PRODUCTION_BRANCH` env var. Leave unset to use
+   * {@link routingEnv} (Custom Environment) detection instead.
+   */
+  productionBranch?: string;
 };
 
 function getClientIP(req: NextRequest): string | null {
@@ -109,6 +124,8 @@ export async function slotCanaryMiddleware(
     opts?.routingEnv ??
     process.env['SHADOW_CANARY_ROUTING_ENV'] ??
     'production';
+  const productionBranch =
+    opts?.productionBranch ?? process.env['SHADOW_CANARY_PRODUCTION_BRANCH'];
 
   // Already rewritten upstream — serve as-is (prevents loops on the nightly /
   // canary deploys, which re-run this middleware on the rewritten request).
@@ -116,24 +133,39 @@ export async function slotCanaryMiddleware(
     return null;
   }
 
-  // Only the routing env (production, holding the public domain) owns the
-  // split. nightly / canary / preview / dev deploys serve their own content.
-  const targetEnv = process.env['VERCEL_TARGET_ENV'];
-  if (targetEnv && targetEnv !== routingEnv) {
-    return null;
+  // Decide whether THIS deploy owns the routing split. Two topologies:
+  //
+  //   Branch mode (productionBranch set): every slot deploys `--prod` to the
+  //   same env, so the git branch is the only signal. Only the production
+  //   branch owns the split; nightly / canary branch deploys serve their own
+  //   content. Preview / dev (VERCEL_ENV != production) pass through.
+  //
+  //   Custom-environment mode (default): VERCEL_TARGET_ENV distinguishes slots;
+  //   only the routing env owns the split.
+  let onRoutingDeploy: boolean;
+  if (productionBranch) {
+    const vercelEnv = process.env['VERCEL_ENV'];
+    if (vercelEnv && vercelEnv !== 'production') return null;
+    const branch = process.env['VERCEL_GIT_COMMIT_REF'];
+    if (branch && branch !== productionBranch) return null;
+    onRoutingDeploy = vercelEnv === 'production';
+  } else {
+    const targetEnv = process.env['VERCEL_TARGET_ENV'];
+    if (targetEnv && targetEnv !== routingEnv) return null;
+    onRoutingDeploy = targetEnv === routingEnv;
   }
 
   if (botPattern.test(req.headers.get('user-agent') ?? '')) {
     return null;
   }
 
-  // Hard-fail on the routing env so misconfigs surface immediately; in local
-  // dev (no VERCEL_TARGET_ENV) passthrough with a one-time warn.
+  // Hard-fail on the routing deploy so misconfigs surface immediately; in local
+  // dev (not the routing deploy) passthrough with a one-time warn.
   let cfg: Awaited<ReturnType<typeof getShadowConfig>>;
   try {
     cfg = await getShadowConfig();
   } catch (err) {
-    if (targetEnv === routingEnv) throw err;
+    if (onRoutingDeploy) throw err;
     warnLocalDevFailureOnce(err);
     return null;
   }

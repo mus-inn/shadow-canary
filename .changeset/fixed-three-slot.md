@@ -16,10 +16,14 @@ changes; existing consumers are unaffected.
   Config read, no `production-track` disambiguation.
 - New middleware: `slotCanaryMiddleware()` / `slotCanaryProxy()` — a single
   percentage roll partitions traffic into nightly | canary | production. The
-  `production` deploy (holding the public domain) owns the split and rewrites
-  to the stable `domainNightly` / `domainCanary`. `routingEnv` /
-  `SHADOW_CANARY_ROUTING_ENV` selects which target env runs the split (default
-  `production`).
+  routing deploy (holding the public domain) owns the split and rewrites to the
+  stable `domainNightly` / `domainCanary`. Two topologies:
+  - **Custom-environment mode** (default): `routingEnv` /
+    `SHADOW_CANARY_ROUTING_ENV` selects which `VERCEL_TARGET_ENV` runs the split.
+  - **Branch mode**: when every slot deploys `--prod` to the same env, set
+    `productionBranch` / `SHADOW_CANARY_PRODUCTION_BRANCH` — only that branch's
+    deploy owns the split; nightly / canary branch deploys serve their own
+    content. Rewrite targets are the stable branch-pinned URLs.
 - `ShadowConfig` gains optional fields `domainNightly`, `domainCanary`,
   `trafficNightlyPercent`, `trafficCanaryPercent`, `forceNightlyIPs`. The
   legacy fields are untouched; a project uses one set or the other.

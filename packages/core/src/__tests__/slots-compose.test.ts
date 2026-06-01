@@ -148,8 +148,11 @@ function run(
 beforeEach(() => {
   vi.resetAllMocks();
   delete process.env['VERCEL_TARGET_ENV'];
+  delete process.env['VERCEL_ENV'];
+  delete process.env['VERCEL_GIT_COMMIT_REF'];
   delete process.env['VERCEL_AUTOMATION_BYPASS_SECRET'];
   delete process.env['SHADOW_CANARY_ROUTING_ENV'];
+  delete process.env['SHADOW_CANARY_PRODUCTION_BRANCH'];
   process.env['VERCEL_TARGET_ENV'] = 'production'; // we ARE the routing deploy
   mockGetShadowConfig.mockResolvedValue(BASE_CFG);
 });
@@ -321,6 +324,54 @@ describe('slotCanaryMiddleware — options', () => {
     process.env['SHADOW_CANARY_ROUTING_ENV'] = 'prod-eu';
     vi.spyOn(Math, 'random').mockReturnValue(0);
     expect((await run(makeReq()))!.rewriteUrl?.hostname).toBe(NIGHTLY);
+  });
+});
+
+describe('slotCanaryMiddleware — branch mode (no Custom Environments)', () => {
+  // All slots deploy --prod to the same env; the git branch is the only signal.
+  it('production-branch deploy owns the split and rewrites', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'production';
+    vi.spyOn(Math, 'random').mockReturnValue(0); // nightly
+    const result = await run(makeReq(), { productionBranch: 'production' });
+    expect(result!.rewriteUrl?.hostname).toBe(NIGHTLY);
+  });
+
+  it('nightly (main) branch deploy serves its own content (null)', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'main';
+    expect(await run(makeReq(), { productionBranch: 'production' })).toBeNull();
+    expect(mockGetShadowConfig).not.toHaveBeenCalled();
+  });
+
+  it('canary branch deploy serves its own content (null)', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'canary';
+    expect(await run(makeReq(), { productionBranch: 'production' })).toBeNull();
+  });
+
+  it('preview deploys pass through in branch mode', async () => {
+    process.env['VERCEL_ENV'] = 'preview';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'production';
+    expect(await run(makeReq(), { productionBranch: 'production' })).toBeNull();
+  });
+
+  it('honors SHADOW_CANARY_PRODUCTION_BRANCH env var', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'prod';
+    process.env['SHADOW_CANARY_PRODUCTION_BRANCH'] = 'prod';
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const result = await run(makeReq());
+    expect(result!.rewriteUrl?.hostname).toBe(NIGHTLY);
+  });
+
+  it('rethrows a config error on the production-branch deploy', async () => {
+    process.env['VERCEL_ENV'] = 'production';
+    process.env['VERCEL_GIT_COMMIT_REF'] = 'production';
+    mockGetShadowConfig.mockRejectedValueOnce(new Error('repo slug missing'));
+    await expect(
+      run(makeReq(), { productionBranch: 'production' }),
+    ).rejects.toThrow(/repo slug missing/);
   });
 });
 
