@@ -29,5 +29,7 @@ jobs:
         run: npm install --global vercel@latest
       - name: Deploy to production
         run: |
-          DEPLOY_URL=$(vercel deploy --prod --token="$VERCEL_TOKEN")
+          # --target=production (equivalent to --prod) keeps symmetry with the
+          # nightly / canary workflows in custom-environment mode.
+          DEPLOY_URL=$(vercel deploy --target=production --token="$VERCEL_TOKEN")
           echo "New production deploy: $DEPLOY_URL"

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth';
-import { patchShadowConfig } from '@/lib/admin-vercel';
+import { patchShadowConfig, readShadowConfig } from '@/lib/admin-vercel';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,19 +36,25 @@ export async function POST(request: Request) {
     patch[field] = Math.round(v * 100) / 100;
   }
 
-  // Guard the invariant nightly + canary ≤ 100 (production gets the rest).
-  const next = { ...patch };
-  if (
-    (next.trafficNightlyPercent ?? 0) + (next.trafficCanaryPercent ?? 0) >
-    100
-  ) {
-    return NextResponse.json(
-      { error: 'nightly + canary must not exceed 100' },
-      { status: 400 },
-    );
-  }
-
   try {
+    // Validate the invariant nightly + canary ≤ 100 against the EFFECTIVE
+    // config (current stored values merged with this patch), not just the
+    // fields sent in this request — a partial patch (`{ nightly: 80 }`) must
+    // still account for the stored canary share. production gets the rest.
+    const current = (await readShadowConfig()) ?? {};
+    const effNightly =
+      patch.trafficNightlyPercent ?? current.trafficNightlyPercent ?? 0;
+    const effCanary =
+      patch.trafficCanaryPercent ?? current.trafficCanaryPercent ?? 0;
+    if (effNightly + effCanary > 100) {
+      return NextResponse.json(
+        {
+          error: `nightly (${effNightly}) + canary (${effCanary}) must not exceed 100`,
+        },
+        { status: 400 },
+      );
+    }
+
     const config = await patchShadowConfig(patch);
     return NextResponse.json({ config });
   } catch (e) {

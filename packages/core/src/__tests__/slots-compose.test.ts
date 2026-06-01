@@ -197,13 +197,12 @@ describe('slotCanaryMiddleware — early returns (null = passthrough)', () => {
     expect(await run(makeReq())).toBeNull();
   });
 
-  it('passthrough + warn when config read throws off the routing env', async () => {
+  it('passthrough (null) without reading config when not the routing deploy (custom-env, target env unset)', async () => {
+    // The hole: VERCEL_TARGET_ENV unset (older runtime / local dev) must NOT
+    // fall through and run the split. Must return before touching Edge Config.
     delete process.env['VERCEL_TARGET_ENV'];
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockGetShadowConfig.mockRejectedValueOnce(new Error('repo slug missing'));
     expect(await run(makeReq())).toBeNull();
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
+    expect(mockGetShadowConfig).not.toHaveBeenCalled();
   });
 
   it('rethrows when config read throws on the routing env', async () => {

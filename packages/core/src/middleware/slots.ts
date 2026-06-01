@@ -58,16 +58,6 @@ function getClientIP(req: NextRequest): string | null {
   return req.headers.get('x-real-ip');
 }
 
-let warnedLocalDevFailure = false;
-function warnLocalDevFailureOnce(err: unknown): void {
-  if (warnedLocalDevFailure) return;
-  warnedLocalDevFailure = true;
-  const msg = err instanceof Error ? err.message : String(err);
-  console.warn(
-    `[shadow-canary] slot middleware passthrough (config read failed off the routing env): ${msg}`,
-  );
-}
-
 function rewriteTo(
   req: NextRequest,
   host: string,
@@ -155,20 +145,23 @@ export async function slotCanaryMiddleware(
     onRoutingDeploy = targetEnv === routingEnv;
   }
 
+  // Only the routing deploy runs the split; everything else serves its own
+  // content. This catches the case the topology guards above DON'T: a deploy
+  // with VERCEL_TARGET_ENV unset (older Vercel runtime, local `next dev`, or a
+  // misconfig) where `targetEnv && …` is falsy — without this it would fall
+  // through and rewrite to domainNightly/domainCanary despite not owning the
+  // public domain. To exercise the split locally, set VERCEL_TARGET_ENV (or
+  // VERCEL_ENV=production + the production branch) so this resolves true.
+  if (!onRoutingDeploy) return null;
+
   if (botPattern.test(req.headers.get('user-agent') ?? '')) {
     return null;
   }
 
-  // Hard-fail on the routing deploy so misconfigs surface immediately; in local
-  // dev (not the routing deploy) passthrough with a one-time warn.
+  // We own routing — hard-fail on a config read error so misconfigs surface
+  // immediately rather than silently serving an unsplit production.
   let cfg: Awaited<ReturnType<typeof getShadowConfig>>;
-  try {
-    cfg = await getShadowConfig();
-  } catch (err) {
-    if (onRoutingDeploy) throw err;
-    warnLocalDevFailureOnce(err);
-    return null;
-  }
+  cfg = await getShadowConfig();
   if (!cfg) return null;
 
   const clientIP = getClientIP(req);
@@ -185,6 +178,9 @@ export async function slotCanaryMiddleware(
       ? stickyRaw
       : null;
 
+  // Sticky cookie wins over forceNightlyIPs: a QA IP that already picked up a
+  // (say) `production` cookie stays there until the cookie expires. forceIPs is
+  // therefore best-effort for fresh sessions — clear the cookie to re-pin.
   let slot: Slot;
   if (sticky) {
     slot = sticky;
