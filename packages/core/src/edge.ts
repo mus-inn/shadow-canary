@@ -22,3 +22,19 @@ export {
   type ShadowCanaryBucket,
   type GetBuildInfoOptions,
 } from './runtime/info.js';
+// Fixed 3-slot model (v0.8+) — additive, opt-in. See `runtime/slots.ts`.
+export {
+  getSlotInfo,
+  getSlotRuntime,
+  formatSlotTag,
+  type FixedSlot,
+  type SlotBuildInfo,
+  type SlotRuntimeInfo,
+  type GetSlotInfoOptions,
+} from './runtime/slots.js';
+export {
+  slotCanaryMiddleware,
+  slotCanaryProxy,
+  type SlotMiddlewareOptions,
+  type SlotProxyOptions,
+} from './middleware/slots.js';

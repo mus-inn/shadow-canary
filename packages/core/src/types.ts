@@ -33,6 +33,29 @@ export type ShadowConfig = {
   // advancing (failing checks vs. passing but gated, etc.) without having to
   // dig into GitHub Actions logs.
   sloChecks?: SloCheck[];
+
+  // ---------------------------------------------------------------------------
+  // Fixed 3-slot model (v0.8+, opt-in via `slotCanaryMiddleware` / `getSlotInfo`).
+  // Additive and independent from the fields above — a project uses EITHER the
+  // legacy 2-branch shadow+ramp fields OR these. See `runtime/slots.ts`.
+  //
+  // The three slots (nightly / canary / production) are stable Vercel Custom
+  // Environments with their own domains. The production deploy owns the split
+  // and rewrites a fixed, operator-controlled share of public traffic to the
+  // nightly / canary domains. No per-deploy URL tracking, no ramp state.
+  // ---------------------------------------------------------------------------
+  // Stable public domain of the `nightly` slot (main-branch Custom Environment).
+  domainNightly?: string;
+  // Stable public domain of the `canary` slot (canary-branch Custom Environment).
+  domainCanary?: string;
+  // Share of public traffic routed to the nightly slot (0–100). Default 0.
+  trafficNightlyPercent?: number;
+  // Share of public traffic routed to the canary slot (0–100). Default 0.
+  // production share = 100 − nightly − canary (whatever is left).
+  trafficCanaryPercent?: number;
+  // IPs pinned to the nightly slot (internal QA / dogfooding) in the 3-slot
+  // model, bypassing the percentage roll. Parallel to `shadowForceIPs`.
+  forceNightlyIPs?: string[];
 };
 
 export type SloCheck = {

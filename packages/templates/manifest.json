@@ -1,5 +1,5 @@
 {
-  "version": "0.2.1",
+  "version": "0.3.0",
   "files": [
     "middleware.ts",
     "next.config.ts",
@@ -31,6 +31,12 @@
     "lib/admin-vercel.ts",
     ".github/workflows/deploy-shadow.yml",
     ".github/workflows/deploy-prod.yml",
-    ".github/workflows/canary-ramp.yml"
+    ".github/workflows/canary-ramp.yml",
+    "three-slot/README.md",
+    "three-slot/proxy.ts",
+    "three-slot/.github/workflows/deploy-nightly.yml",
+    "three-slot/.github/workflows/deploy-canary.yml",
+    "three-slot/.github/workflows/deploy-prod.yml",
+    "three-slot/app/api/admin/rollout/route.ts"
   ]
 }
