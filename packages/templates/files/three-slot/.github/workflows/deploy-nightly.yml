@@ -1,0 +1,34 @@
+name: Deploy nightly (main → nightly Custom Environment)
+
+# Fixed 3-slot model: each slot is a Vercel Custom Environment with a stable
+# domain, so deploying to the env updates its current deployment automatically.
+# No Edge Config patching, no promote, no canary ramp. Traffic share is
+# operator-controlled from /admin (trafficNightlyPercent).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: shadow-canary-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Deploy to the nightly Custom Environment
+        run: |
+          DEPLOY_URL=$(vercel deploy --target=nightly --token="$VERCEL_TOKEN")
+          echo "New nightly deploy: $DEPLOY_URL"

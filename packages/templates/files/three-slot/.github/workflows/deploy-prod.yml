@@ -1,0 +1,33 @@
+name: Deploy production (production → public domain)
+
+# Fixed 3-slot model: production owns the public domain and the traffic split.
+# A plain prod deploy — no ramp, no markers, no Edge Config writes. Promotion of
+# canary→production and main→canary is handled by the MEP workflow, not here.
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+concurrency:
+  group: shadow-canary-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Deploy to production
+        run: |
+          DEPLOY_URL=$(vercel deploy --prod --token="$VERCEL_TOKEN")
+          echo "New production deploy: $DEPLOY_URL"

@@ -35,12 +35,28 @@ To call authenticated admin endpoints:
 
 Cache the cookie in memory for the session. If it expires (401), re-login.
 
+## Topology: 2-branch (ramp) vs 3-slot (fixed)
+
+The core package supports two deployment topologies. Detect which one the
+project uses by reading the Edge Config key (`shadow-<repo-slug>-canary`):
+
+- **2-branch shadow + canary-ramp** (legacy default): config has
+  `deploymentDomainProd`, `trafficShadowPercent`, `trafficProdCanaryPercent`.
+  All subcommands below (pause/resume/promote/step/ramp) apply.
+- **Fixed 3-slot** (nightly / canary / production): config has
+  `domainNightly`, `domainCanary`, `trafficNightlyPercent`,
+  `trafficCanaryPercent`. There is **no ramp** — pause/resume/promote/step do
+  not apply. Rollout is edited directly (set the two percentages); promotion
+  between slots is done with the MEP flow (PR canary→production then
+  main→canary). See `three-slot.md`.
+
 ## Subcommands
 
 Each subcommand has its own instruction file:
 - `install.md` — /shadow-canary:install
 - `status.md` — /shadow-canary:status
-- `pause.md`, `resume.md`, `promote.md`, `cancel.md` — canary state changes
-- `rollback.md` — 1-click rollback to previous deploy
+- `pause.md`, `resume.md`, `promote.md`, `cancel.md` — canary state changes (2-branch ramp only)
+- `rollback.md` — 1-click rollback to previous deploy (2-branch only)
 - `deploy.md` — trigger shadow or prod deploy via git push
 - `doctor.md` — verify setup
+- `three-slot.md` — fixed 3-slot model (nightly/canary/production): read state, edit rollout %

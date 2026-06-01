@@ -1,0 +1,29 @@
+name: Deploy canary (canary → canary Custom Environment)
+
+on:
+  push:
+    branches: [canary]
+  workflow_dispatch:
+
+concurrency:
+  group: shadow-canary-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Deploy to the canary Custom Environment
+        run: |
+          DEPLOY_URL=$(vercel deploy --target=canary --token="$VERCEL_TOKEN")
+          echo "New canary deploy: $DEPLOY_URL"
