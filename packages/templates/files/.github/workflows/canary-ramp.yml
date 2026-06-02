@@ -1,9 +1,18 @@
-name: Canary ramp (SLO-gated)
+name: Canary ramp (SLO-gated) — manual fallback
 
-# Runs every 15 min on the default branch. Reads the canary state from Edge
-# Config; if a canary is in progress (pct < 100), hits the SLO endpoint on the
-# new prod deploy twice (30s apart). Both 200 → bump; any failure → rollback
-# to 0% and Slack-notify.
+# Primary scheduler: Vercel Cron → `/api/canary-tick` (see vercel.json).
+# Vercel Cron fires on time with guaranteed delivery; the GH Actions
+# `schedule:` was best-effort under runner load (intervals up to 80+ min
+# observed) and could be silently cancelled by deploy-shadow sharing the
+# concurrency group.
+#
+# This workflow is kept as a `workflow_dispatch`-only fallback so an
+# operator can hand-trigger a tick if `/api/canary-tick` is broken (e.g.
+# during a bad deploy that ships a failing route). It mirrors the same
+# decision logic: reads canary state from Edge Config; if a canary is in
+# progress (pct < 100), hits the SLO endpoint on the new prod deploy twice
+# (30s apart). Both 200 → bump; any failure → rollback to 0% and
+# Slack-notify.
 #
 # Ramp curve (Europe/Paris):
 #   - before 12:00 → cap at 20% (soft start, night-time safety)
@@ -11,8 +20,6 @@ name: Canary ramp (SLO-gated)
 #   - step = +4 percentage points per tick
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 # Shared concurrency group with deploy-prod.yml + deploy-shadow.yml:
