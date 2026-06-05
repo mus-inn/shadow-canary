@@ -1,0 +1,30 @@
+name: Templates Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'packages/templates/files/**'
+      - 'examples/greenfield/**'
+      - 'packages/templates/bin/sync-from-source.mjs'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-sync:
+    name: Verify templates ↔ greenfield are in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm sync:templates:check

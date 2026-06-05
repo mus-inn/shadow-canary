@@ -12,6 +12,18 @@
     "manifest.json",
     "README.md"
   ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@dotworld/shadow-canary-core": "workspace:^",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "react": "^19",
+    "typescript": "^5.6",
+    "vitest": "^2"
+  },
   "publishConfig": {
     "access": "public"
   },
